@@ -28,15 +28,15 @@ class CachingBelongsToMany extends BelongsToMany
      * @param  Model  $cacheableParent
      * @return void
      */
-    public function __construct($query, $parent, $table, $foreignPivotKey, 
-                               $relatedPivotKey, $parentKey, $relatedKey, 
+    public function __construct($query, $parent, $table, $foreignPivotKey,
+                               $relatedPivotKey, $parentKey, $relatedKey,
                                $relationName = null, $cacheableParent = null)
     {
         parent::__construct(
-            $query, $parent, $table, $foreignPivotKey, 
+            $query, $parent, $table, $foreignPivotKey,
             $relatedPivotKey, $parentKey, $relatedKey, $relationName
         );
-        
+
         // Store the parent model that has the cache trait
         $this->cacheableParent = $cacheableParent ?: $parent;
     }
@@ -53,7 +53,7 @@ class CachingBelongsToMany extends BelongsToMany
     {
         // Call parent method to perform the actual attach
         parent::attach($id, $attributes, $touch);
-        
+
         // Flush cache after operation
         $this->flushCache('attach');
     }
@@ -69,10 +69,12 @@ class CachingBelongsToMany extends BelongsToMany
     {
         // Call parent method to perform the actual detach
         $result = parent::detach($ids, $touch);
-        
+
         // Flush cache after operation
-        $this->flushCache('detach');
-        
+        if ($result) {
+            $this->flushCache('detach');
+        }
+
         return $result;
     }
 
@@ -87,10 +89,14 @@ class CachingBelongsToMany extends BelongsToMany
     {
         // Call parent method to perform the actual sync
         $result = parent::sync($ids, $detaching);
-        
+
         // Flush cache after operation
-        $this->flushCache('sync');
-        
+        if (count($result['attached']) ||
+            count($result['updated']) ||
+            count($result['detached'])) {
+            $this->flushCache('sync');
+        }
+
         return $result;
     }
 
@@ -106,10 +112,12 @@ class CachingBelongsToMany extends BelongsToMany
     {
         // Call parent method to perform the actual update
         $result = parent::updateExistingPivot($id, $attributes, $touch);
-        
+
         // Flush cache after operation
-        $this->flushCache('updateExistingPivot');
-        
+        if ($result) {
+            $this->flushCache('updateExistingPivot');
+        }
+
         return $result;
     }
 
@@ -123,10 +131,14 @@ class CachingBelongsToMany extends BelongsToMany
     {
         // Call parent method to perform the actual sync
         $result = parent::syncWithoutDetaching($ids);
-        
+
         // Flush cache after operation
-        $this->flushCache('syncWithoutDetaching');
-        
+        if (count($result['attached']) ||
+            count($result['updated']) ||
+            count($result['detached'])) {
+            $this->flushCache('syncWithoutDetaching');
+        }
+
         return $result;
     }
 

@@ -330,7 +330,7 @@ class CacheableBuilder extends Builder
     protected function supportsTags($cache)
     {
         try {
-            return method_exists($cache, 'tags') && $cache->supportsTags();
+            return method_exists($cache, 'supportsTags') && $cache->supportsTags();
         } catch (\Exception $e) {
             return false;
         }
