@@ -1,6 +1,10 @@
 # Laravel specific
 /vendor
 
+# PHPUnit
+.phpunit.cache/
+.phpunit.result.cache
+
 # IDEs and editors
 /.fleet
 /.idea
@@ -12,7 +16,6 @@
 # OS specific
 .DS_Store
 Thumbs.db
-
 
 # Keep these directories
 !.gitignore

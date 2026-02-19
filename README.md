@@ -504,3 +504,59 @@ If you're using another caching package:
 2. Remove manual cache key generation code
 3. Replace custom cache retrieval methods with standard Eloquent methods or the explicit `getFromCache()` methods
 4. Remove manual cache invalidation code (this package handles it automatically)
+
+## Testing
+
+This package includes a comprehensive test suite to ensure all caching functionality works correctly.
+
+### Running Tests
+
+To run the test suite:
+
+```bash
+# Install dependencies (including dev dependencies)
+composer install
+
+# Run all tests
+composer test
+
+# Or use PHPUnit directly
+vendor/bin/phpunit
+
+# Run tests with detailed output
+vendor/bin/phpunit --testdox
+```
+
+### Test Coverage
+
+The test suite includes:
+
+- **Unit Tests**: Test individual components like HasCachedQueries trait, CacheableBuilder, and ModelRelationships
+- **Feature Tests**: Integration tests covering complex scenarios like cache invalidation, relationships, and console commands
+- **Fixtures**: Test models and database migrations to simulate real-world usage
+
+### Test Structure
+
+```
+tests/
+├── TestCase.php                        # Base test class
+├── Unit/
+│   ├── HasCachedQueriesTest.php       # Tests for the main trait
+│   ├── CacheableBuilderTest.php       # Tests for query builder
+│   └── ModelRelationshipsTest.php      # Tests for relationship caching
+├── Feature/
+│   ├── CacheIntegrationTest.php       # Integration tests
+│   └── ConsoleCommandTest.php          # Console command tests
+└── Fixtures/
+    ├── Models/                         # Test model fixtures
+    └── database/migrations/            # Test database migrations
+```
+
+### Contributing Tests
+
+When contributing to this package, please:
+
+1. Add tests for any new features
+2. Ensure all existing tests pass
+3. Follow the existing test structure and naming conventions
+4. Use descriptive test method names that explain what is being tested
