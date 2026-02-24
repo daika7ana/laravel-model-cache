@@ -15,7 +15,7 @@ class ModelCacheServiceProvider extends ServiceProvider
     public function boot()
     {
         $this->publishes([
-            __DIR__.'/../config/model-cache.php' => config_path('model-cache.php'),
+            __DIR__ . '/../config/model-cache.php' => config_path('model-cache.php'),
         ], 'config');
 
         if ($this->app->runningInConsole()) {
@@ -32,8 +32,10 @@ class ModelCacheServiceProvider extends ServiceProvider
      */
     public function register()
     {
+        $this->app->singleton(ModelCacheDebugger::class);
+
         $this->mergeConfigFrom(
-            __DIR__.'/../config/model-cache.php', 'model-cache'
+            __DIR__ . '/../config/model-cache.php', 'model-cache'
         );
     }
 }

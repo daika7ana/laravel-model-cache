@@ -6,10 +6,9 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use YMigVal\LaravelModelCache\HasCachedQueries;
 
-
 class User extends Authenticatable
 {
-    use Notifiable, HasCachedQueries;
+    use HasCachedQueries, Notifiable;
 
     /**
      * The attributes that are mass assignable.
@@ -37,11 +36,11 @@ class User extends Authenticatable
     protected $casts = [
         'email_verified_at' => 'datetime',
     ];
-    
+
     /**
      * Example of using the cached queries in a scope.
      *
-     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
      * @return \Illuminate\Database\Eloquent\Builder
      */
     public function scopeActive($query)

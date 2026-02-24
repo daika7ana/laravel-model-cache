@@ -27,7 +27,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | This option controls the cache store that gets used for storing
-    | and retrieving queries. Use env('MODEL_CACHE_STORE') to specify 
+    | and retrieving queries. Use env('MODEL_CACHE_STORE') to specify
     | a different store than your main application cache.
     |
     | Note: For tag support, use Redis or Memcached drivers.
@@ -44,7 +44,7 @@ return [
     |
     */
     'enabled' => env('MODEL_CACHE_ENABLED', true),
-    
+
     /*
     |--------------------------------------------------------------------------
     | Debug Mode

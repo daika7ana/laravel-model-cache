@@ -3,7 +3,10 @@
 namespace YMigVal\LaravelModelCache\Console\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
+use ReflectionMethod;
 use Symfony\Component\Console\Command\Command as CommandAlias;
 
 class ClearModelCacheCommand extends Command
@@ -24,10 +27,8 @@ class ClearModelCacheCommand extends Command
 
     /**
      * Execute the console command.
-     *
-     * @return int
      */
-    public function handle()
+    public function handle(): int
     {
         $modelClass = $this->argument('model');
 
@@ -42,84 +43,86 @@ class ClearModelCacheCommand extends Command
 
     /**
      * Clear cache for a specific model.
-     *
-     * @param string $modelClass
-     * @return void
      */
-    protected function clearModelCache(string $modelClass)
+    protected function clearModelCache(string $modelClass): void
     {
-        if (!class_exists($modelClass)) {
-            $this->error("Model class {$modelClass} does not exist!");
+        if (! class_exists($modelClass)) {
+            $this->components->error("Model class {$modelClass} does not exist!");
+
             return;
         }
 
-        $this->info("Attempting to clear cache for model: {$modelClass}");
+        if (! is_a($modelClass, Model::class, true)) {
+            $this->components->error("Class {$modelClass} is not an Eloquent model.");
+
+            return;
+        }
+
+        $this->components->info("Attempting to clear cache for model: {$modelClass}");
 
         // Check if the model uses our trait
-        if (!$this->usesHasCachedQueriesTrait($modelClass)) {
-            $this->warn("Warning: The model {$modelClass} doesn't use HasCachedQueries trait. Cache functionality might be limited.");
+        if (! $this->usesHasCachedQueriesTrait($modelClass)) {
+            $this->components->warn("Warning: The model {$modelClass} doesn't use HasCachedQueries trait. Cache functionality might be limited.");
         }
 
         // Show the current cache configuration
-        $this->info("Current cache driver: " . config('cache.default'));
-        $this->info("Model cache store: " . config('model-cache.cache_store', 'default'));
-    
+        $this->components->info('Current cache driver: ' . config('cache.default'));
+        $this->components->info('Model cache store: ' . config('model-cache.cache_store', 'default'));
+
         try {
             // First check if the model has static flush methods
-            if (method_exists($modelClass, 'flushModelCache') &&
-                is_callable([$modelClass, 'flushModelCache']) &&
-                (new \ReflectionMethod($modelClass, 'flushModelCache'))->isStatic()) {
-                // For backward compatibility - check if static flushModelCache exists
-                $this->info("Found static method: flushModelCache");
+            if (
+                method_exists($modelClass, 'flushModelCache')
+                && (new ReflectionMethod($modelClass, 'flushModelCache'))->isStatic()
+            ) {
                 $result = $modelClass::flushModelCache();
                 if ($result) {
-                    $this->info("Cache cleared successfully for model: {$modelClass} using static method");
+                    $this->components->info("Cache cleared successfully for model: {$modelClass}");
                 } else {
-                    $this->warn("Static method returned false - cache may not have been cleared completely");
+                    $this->components->warn('Static method returned false - cache may not have been cleared completely');
                     // Force a full cache clear as a backup
                     $this->performFullCacheFlush();
                 }
+
                 return;
             }
 
-            $this->info("No static methods found. Trying with instance methods...");
+            $this->components->info('No static methods found. Trying with instance methods...');
 
             // If no static methods, try instance methods
-            $model = new $modelClass();
+            $model = new $modelClass;
             $tableName = $model->getTable();
-            $this->info("Model table: {$tableName}");
-    
+            $this->components->info("Model table: {$tableName}");
+
             if (method_exists($model, 'flushCache')) {
-                $this->info("Found instance method: flushCache");
                 $result = $model->flushCache();
                 if ($result) {
-                    $this->info("Cache cleared successfully for model: {$modelClass}");
+                    $this->components->info("Cache cleared successfully for model: {$modelClass}");
                 } else {
-                    $this->warn("Instance method returned false - cache may not have been cleared completely");
+                    $this->components->warn('Instance method returned false - cache may not have been cleared completely');
                     // Force a full cache clear as a backup
                     $this->performFullCacheFlush();
                 }
             } elseif (method_exists($model, 'flushModelCache')) {
-                // For backward compatibility
-                $this->info("Found instance method: flushModelCache");
-                $result = $model::flushModelCache();
+                // For backward compatibility with instance methods
+                $result = $model->flushModelCache();
                 if ($result) {
-                    $this->info("Cache cleared successfully for model: {$modelClass}");
+                    $this->components->info("Cache cleared successfully for model: {$modelClass}");
                 } else {
-                    $this->warn("Instance method returned false - cache may not have been cleared completely");
+                    $this->components->warn('Instance method returned false - cache may not have been cleared completely');
                     // Force a full cache clear as a backup
                     $this->performFullCacheFlush();
                 }
             } else {
-                $this->warn("No cache flush methods found on the model. Using manual clearing...");
+                $this->components->warn('No cache flush methods found on the model. Using manual clearing...');
                 $this->clearModelCacheManually($modelClass, $tableName);
             }
         } catch (\Exception $e) {
-            $this->error("Error clearing cache for {$modelClass}: " . $e->getMessage());
-            $this->error("Stack trace: " . $e->getTraceAsString());
+            $this->components->error("Error clearing cache for {$modelClass}: " . $e->getMessage());
+            $this->components->error('Stack trace: ' . $e->getTraceAsString());
 
             // Ask if user wants to try full cache flush as a last resort
-            if ($this->confirm('Would you like to clear the entire application cache?', true)) {
+            if ($this->components->confirm('Would you like to clear the entire application cache?', true)) {
                 $this->performFullCacheFlush();
             }
         }
@@ -127,51 +130,39 @@ class ClearModelCacheCommand extends Command
 
     /**
      * Check if a model uses the HasCachedQueries trait.
-     *
-     * @param string $class
-     * @return bool
      */
-    protected function usesHasCachedQueriesTrait($class)
+    protected function usesHasCachedQueriesTrait(string $class): bool
     {
         $traits = class_uses_recursive($class);
+
         return isset($traits['YMigVal\LaravelModelCache\HasCachedQueries']);
     }
 
     /**
      * Perform a full cache flush as a last resort.
-     *
-     * @return void
      */
-    protected function performFullCacheFlush()
+    protected function performFullCacheFlush(): void
     {
-        $this->info("Performing full cache flush as a fallback...");
+        $this->components->info('Performing full cache flush as a fallback...');
 
         try {
-            // Get the cache driver
-            $cacheStore = config('model-cache.cache_store');
-            $cache = $cacheStore ? \Illuminate\Support\Facades\Cache::store($cacheStore) : \Illuminate\Support\Facades\Cache::store();
+            $cache = $this->cacheRepository();
 
             // Flush everything
             $cache->flush();
-            $this->info("Full application cache has been cleared successfully");
+            $this->components->info('Full application cache has been cleared successfully');
         } catch (\Exception $e) {
-            $this->error("Error performing full cache flush: " . $e->getMessage());
+            $this->components->error('Error performing full cache flush: ' . $e->getMessage());
         }
     }
 
     /**
      * Clear cache manually when flushModelCache is not available.
-     *
-     * @param string $modelClass
-     * @param string $tableName
-     * @return void
      */
-    protected function clearModelCacheManually(string $modelClass, string $tableName)
+    protected function clearModelCacheManually(string $modelClass, string $tableName): void
     {
         try {
-            // Try to get the configured cache store
-            $cacheStore = config('model-cache.cache_store');
-            $cache = $cacheStore ? Cache::store($cacheStore) : Cache::store();
+            $cache = $this->cacheRepository();
 
             $tags = ['model_cache', $modelClass, $tableName];
 
@@ -179,95 +170,80 @@ class ClearModelCacheCommand extends Command
             if ($this->supportsTags($cache)) {
                 try {
                     $cache->tags($tags)->flush();
-                    $this->info("Cache cleared for model: {$modelClass} using tags");
+                    $this->components->info("Cache cleared for model: {$modelClass} using tags");
+
                     return;
                 } catch (\Exception $e) {
-                    $this->warn("Error using cache tags: " . $e->getMessage());
+                    $this->components->warn('Error using cache tags: ' . $e->getMessage());
                 }
             }
 
             // If we reach here, tags are not supported or failed
             // For simplicity, just confirm and clear all cache
-            if ($this->confirm("Your cache driver doesn't support tags or there was an error. Would you like to clear ALL application cache?", false)) {
+            if ($this->components->confirm("Your cache driver doesn't support tags or there was an error. Would you like to clear ALL application cache?", false)) {
                 $cache->flush();
-                $this->info("All cache cleared successfully");
+                $this->components->info('All cache cleared successfully');
             } else {
-                $this->info("Cache clearing cancelled");
+                $this->components->info('Cache clearing cancelled');
             }
 
         } catch (\Exception $e) {
-            $this->error("Error clearing cache: " . $e->getMessage());
+            $this->components->error('Error clearing cache: ' . $e->getMessage());
         }
     }
 
     /**
      * Clear cache for all models.
-     *
-     * @return void
      */
-    protected function clearAllModelCache()
+    protected function clearAllModelCache(): void
     {
         try {
-            // Try to get the configured cache store
-            $cacheStore = config('model-cache.cache_store');
-            $cache = $cacheStore ? Cache::store($cacheStore) : Cache::store();
+            $cache = $this->cacheRepository();
 
             // First try to use tags if supported
             if ($this->supportsTags($cache)) {
                 try {
                     $cache->tags('model_cache')->flush();
-                    $this->info("Cache cleared for all models using tags");
+                    $this->components->success('Cache cleared for all models using tags');
+
                     return;
                 } catch (\Exception $e) {
-                    $this->warn("Error using cache tags: " . $e->getMessage());
+                    $this->components->warn('Error using cache tags: ' . $e->getMessage());
                 }
             }
 
             // If we reach here, tags are not supported or failed
             // Ask for confirmation before clearing all cache
-            if ($this->confirm('Your cache driver doesn\'t support tags. This will clear ALL application cache. Continue?', false)) {
+            if ($this->components->confirm('Your cache driver doesn\'t support tags. This will clear ALL application cache. Continue?', false)) {
                 $cache->flush();
-                $this->info("All cache cleared successfully");
+                $this->components->success('All cache cleared successfully');
             } else {
-                $this->info("Cache clearing cancelled");
+                $this->components->info('Cache clearing cancelled');
             }
-
         } catch (\Exception $e) {
-            $this->error("Error clearing cache: " . $e->getMessage());
+            $this->components->error('Error clearing cache: ' . $e->getMessage());
         }
     }
 
     /**
      * Check if the cache repository supports tagging.
-     *
-     * @param \Illuminate\Contracts\Cache\Repository $cache
-     * @return bool
      */
-    protected function supportsTags($cache)
+    protected function supportsTags(Repository $cache): bool
     {
         try {
-            return method_exists($cache, 'tags') && $cache->supportsTags();
+            return method_exists($cache, 'supportsTags') && $cache->supportsTags();
         } catch (\Exception $e) {
             return false;
         }
     }
 
     /**
-     * Performs a full cache clear when tags aren't supported.
-     *
-     * @param \Illuminate\Contracts\Cache\Repository $cache
-     * @return void
+     * Resolve cache repository using configured model cache store.
      */
-    protected function performFullCacheClear($cache)
+    protected function cacheRepository(): Repository
     {
-        $this->warn("Your cache driver doesn't support tags. Using full cache clear...");
+        $cacheStore = config('model-cache.cache_store');
 
-        // Optionally, you can ask for confirmation before clearing all cache
-        if ($this->confirm('This will clear ALL application cache, not just model cache. Continue?', true)) {
-            $cache->flush();
-            $this->info("All cache cleared (cannot target specific model without tags support)");
-        } else {
-            $this->info("Cache clearing cancelled");
-        }
+        return $cacheStore ? Cache::store($cacheStore) : Cache::store();
     }
 }

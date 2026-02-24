@@ -2,14 +2,12 @@
 
 namespace YMigVal\LaravelModelCache;
 
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-
 /**
  * Helper trait to flush cache when relationship methods are called.
  *
  * This trait can be used alongside HasCachedQueries to ensure that
  * operations on model relationships also flush the cache appropriately.
+ *
  * @method newRelatedInstance(string $related)
  * @method getForeignKey()
  * @method joiningTable(string $related)
@@ -31,14 +29,14 @@ trait ModelRelationships
      * @return \YMigVal\LaravelModelCache\CachingBelongsToMany
      */
     public function belongsToMany($related, $table = null, $foreignPivotKey = null, $relatedPivotKey = null,
-                                  $parentKey = null, $relatedKey = null, $relation = null)
+        $parentKey = null, $relatedKey = null, $relation = null)
     {
         // Get the original relationship instance
         $instance = $this->newRelatedInstance($related);
 
         $foreignPivotKey = $foreignPivotKey ?: $this->getForeignKey();
         $relatedPivotKey = $relatedPivotKey ?: $instance->getForeignKey();
-        
+
         // Determine the relationship name if not provided
         if (is_null($relation)) {
             $relation = $this->guessBelongsToManyRelation();
@@ -51,14 +49,14 @@ trait ModelRelationships
 
         // Create our caching BelongsToMany relationship
         return new CachingBelongsToMany(
-            $instance->newQuery(), 
-            $this, 
+            $instance->newQuery(),
+            $this,
             $table,
-            $foreignPivotKey, 
-            $relatedPivotKey, 
+            $foreignPivotKey,
+            $relatedPivotKey,
             $parentKey ?: $this->getKeyName(),
-            $relatedKey ?: $instance->getKeyName(), 
-            $relation, 
+            $relatedKey ?: $instance->getKeyName(),
+            $relation,
             $this
         );
     }
@@ -66,32 +64,22 @@ trait ModelRelationships
     /**
      * Override the belongsToMany relation's sync method to flush cache.
      *
-     * @param string $relation
-     * @param array $ids
-     * @param bool $detaching
+     * @param  string  $relation
+     * @param  bool  $detaching
      * @return array
      */
     public function syncRelationshipAndFlushCache($relation, array $ids, $detaching = true)
     {
-        if (!method_exists($this, $relation)) {
+        if (! method_exists($this, $relation)) {
             throw new \BadMethodCallException("Method {$relation} does not exist.");
         }
 
         $result = $this->$relation()->sync($ids, $detaching);
 
-        // Flush the cache
-        if (method_exists($this, 'flushModelCache')) {
-            $this->flushModelCache();
-        } else {
-            if (method_exists($this->cacheableParent, 'flushCache')) {
-                $this->cacheableParent->flushCache();
-            } else {
-                throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
-            }
-        }
+        $changes = count($result['attached'] ?? []) + count($result['updated'] ?? []) + count($result['detached'] ?? []);
 
-        if (config('model-cache.debug_mode', false) && function_exists('logger')) {
-            logger()->info("Cache flushed after detach operation for model: " . get_class($this));
+        if ($changes > 0) {
+            $this->flushRelationshipCache('sync');
         }
 
         return $result;
@@ -100,65 +88,44 @@ trait ModelRelationships
     /**
      * Override the belongsToMany relation's attach method to flush cache.
      *
-     * @param string $relation
-     * @param mixed $ids
-     * @param array $attributes
-     * @param bool $touch
+     * @param  string  $relation
+     * @param  mixed  $ids
+     * @param  bool  $touch
      * @return void
      */
     public function attachRelationshipAndFlushCache($relation, $ids, array $attributes = [], $touch = true)
     {
-        if (!method_exists($this, $relation)) {
+        if (! method_exists($this, $relation)) {
             throw new \BadMethodCallException("Method {$relation} does not exist.");
+        }
+
+        if (empty((array) $ids)) {
+            return;
         }
 
         $this->$relation()->attach($ids, $attributes, $touch);
 
-        // Flush the cache
-        if (method_exists($this, 'flushModelCache')) {
-            $this->flushModelCache();
-        } else {
-            if (method_exists($this->cacheableParent, 'flushCache')) {
-                $this->cacheableParent->flushCache();
-            } else {
-                throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
-            }
-        }
-
-        if (config('model-cache.debug_mode', false) && function_exists('logger')) {
-            logger()->info("Cache flushed after detach operation for model: " . get_class($this));
-        }
+        $this->flushRelationshipCache('attach');
     }
 
     /**
      * Override the belongsToMany relation's detach method to flush cache.
      *
-     * @param string $relation
-     * @param mixed $ids
-     * @param bool $touch
+     * @param  string  $relation
+     * @param  mixed  $ids
+     * @param  bool  $touch
      * @return int
      */
     public function detachRelationshipAndFlushCache($relation, $ids = null, $touch = true)
     {
-        if (!method_exists($this, $relation)) {
+        if (! method_exists($this, $relation)) {
             throw new \BadMethodCallException("Method {$relation} does not exist.");
         }
 
         $result = $this->$relation()->detach($ids, $touch);
 
-        // Flush the cache
-        if (method_exists($this, 'flushModelCache')) {
-            $this->flushModelCache();
-        } else {
-            if (method_exists($this->cacheableParent, 'flushCache')) {
-                $this->cacheableParent->flushCache();
-            } else {
-                throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
-            }
-        }
-
-        if (config('model-cache.debug_mode', false) && function_exists('logger')) {
-            logger()->info("Cache flushed after detach operation for model: " . get_class($this));
+        if ($result > 0) {
+            $this->flushRelationshipCache('detach');
         }
 
         return $result;
@@ -171,8 +138,28 @@ trait ModelRelationships
      */
     protected function guessBelongsToManyRelation()
     {
-        list($one, $two, $caller) = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3);
+        if (method_exists(parent::class, 'guessBelongsToManyRelation')) {
+            return parent::guessBelongsToManyRelation();
+        }
+
+        [$one, $two, $caller] = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3);
 
         return $caller['function'];
+    }
+
+    /**
+     * Flush relationship cache and emit debug log.
+     */
+    protected function flushRelationshipCache(string $operation): void
+    {
+        if (method_exists($this, 'flushModelCache')) {
+            $this->flushModelCache();
+        } elseif (method_exists($this, 'flushCache')) {
+            $this->flushCache();
+        } else {
+            throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
+        }
+
+        resolve(ModelCacheDebugger::class)->info("Cache flushed after {$operation} operation for model: " . get_class($this));
     }
 }
