@@ -321,9 +321,10 @@ class CacheableBuilder extends Builder
             $serializedBindings = serialize($bindings);
 
             // Log the operation if logger is available
-            resolve(ModelCacheDebugger::class)->info("Flushing specific query cache: {$cacheKey}");
-            resolve(ModelCacheDebugger::class)->debug("SQL: {$sql}");
-            resolve(ModelCacheDebugger::class)->debug('Bindings: ' . json_encode($bindings));
+            $debugger = resolve(ModelCacheDebugger::class);
+            $debugger->info("Flushing specific query cache: {$cacheKey}");
+            $debugger->debug("SQL: {$sql}");
+            $debugger->debug('Bindings: ' . json_encode($bindings));
 
             $success = false;
 
@@ -331,7 +332,7 @@ class CacheableBuilder extends Builder
             $result = $cache->forget($cacheKey);
             if ($result) {
                 $success = true;
-                resolve(ModelCacheDebugger::class)->debug("Successfully removed specific cache key: {$cacheKey}");
+                $debugger->debug("Successfully removed specific cache key: {$cacheKey}");
             }
 
             // Also try with tags if supported
@@ -347,10 +348,10 @@ class CacheableBuilder extends Builder
                     $cache->tags($queryTags)->flush();
 
                     $success = true;
-                    resolve(ModelCacheDebugger::class)->debug('Successfully flushed cache using tags for model: ' . get_class($this->model));
+                    $debugger->debug('Successfully flushed cache using tags for model: ' . get_class($this->model));
                 } catch (\Exception $e) {
                     // If this fails, we already tried the direct key removal above
-                    resolve(ModelCacheDebugger::class)->debug("Could not flush by query tags: {$e->getMessage()}");
+                    $debugger->debug("Could not flush by query tags: {$e->getMessage()}");
                 }
             }
 
@@ -359,13 +360,13 @@ class CacheableBuilder extends Builder
                 if (method_exists($this->model, 'flushModelCache')) {
                     $this->model->flushModelCache();
                     $success = true;
-                    resolve(ModelCacheDebugger::class)->info('Flushed entire model cache for: ' . get_class($this->model));
+                    $debugger->info('Flushed entire model cache for: ' . get_class($this->model));
                 }
             }
 
             return $success || $result;
         } catch (\Exception $e) {
-            resolve(ModelCacheDebugger::class)->error("Error flushing query cache: {$e->getMessage()}");
+            $debugger->error("Error flushing query cache: {$e->getMessage()}");
 
             return false;
         }

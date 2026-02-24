@@ -99,6 +99,7 @@ trait HasCachedQueries
 
             // Get the cache driver directly
             $cache = self::getStaticCacheDriver();
+            $debugger = resolve(ModelCacheDebugger::class);
 
             // Set tags for this model
             $tags = [
@@ -111,23 +112,23 @@ trait HasCachedQueries
             if (method_exists($cache, 'supportsTags') && $cache->supportsTags()) {
                 try {
                     $result = $cache->tags($tags)->flush();
-                    resolve(ModelCacheDebugger::class)->info("Cache flushed statically for model: {$modelClass}");
+                    $debugger->info("Cache flushed statically for model: {$modelClass}");
 
                     return $result;
                 } catch (\Exception $e) {
-                    resolve(ModelCacheDebugger::class)->error("Error flushing cache with tags for model {$modelClass}: {$e->getMessage()}");
+                    $debugger->error("Error flushing cache with tags for model {$modelClass}: {$e->getMessage()}");
                     // Continue to fallback method if tags fail
                 }
             }
 
             // Fallback to flush the entire cache
             $result = $cache->flush();
-            resolve(ModelCacheDebugger::class)->info("Entire cache flushed for model: {$modelClass}");
+            $debugger->info("Entire cache flushed for model: {$modelClass}");
 
             return $result;
 
         } catch (\Exception $e) {
-            resolve(ModelCacheDebugger::class)->error('Error in flushCacheStatic for model ' . static::class . ": {$e->getMessage()}");
+            $debugger->error('Error in flushCacheStatic for model ' . static::class . ": {$e->getMessage()}");
 
             return false;
         }
