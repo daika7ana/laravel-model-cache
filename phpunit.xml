@@ -19,7 +19,7 @@
         <env name="CACHE_DRIVER" value="redis"/>
         <env name="REDIS_HOST" value="cache"/>
         <env name="DB_CONNECTION" value="testing"/>
-        <env name="MODEL_CACHE_ENABLED" value="true"/>
+        <env name="MODEL_CACHE_ENABLED" value="false"/>
         <env name="MODEL_CACHE_DEBUG" value="false"/>
     </php>
     <source>

@@ -7,6 +7,23 @@ use PHPUnit\Framework\Attributes\Test;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
 use YMigVal\LaravelModelCache\Tests\TestCase;
 
+/**
+ * Test suite for CacheableBuilder caching functionality.
+ *
+ * This test suite validates the CacheableBuilder class, which extends Laravel's query builder
+ * to add automatic caching support. Tests are organized into two categories:
+ *
+ * 1. Caching Methods:
+ *    - remember(), getFromCache(), firstFromCache()
+ *    - Query result caching via various builder methods
+ *
+ * 2. Cache Key Generation:
+ *    - Validates unique cache keys for different queries
+ *    - Ensures query-specific and relationship-specific caching
+ *
+ * Note: Cache invalidation tests (via model events or builder overrides) are consolidated
+ * in the dedicated CacheInvalidationTest class to avoid duplication.
+ */
 class CacheableBuilderTest extends TestCase
 {
     protected function setUp(): void
@@ -16,6 +33,8 @@ class CacheableBuilderTest extends TestCase
         // Clear cache before each test
         Cache::flush();
     }
+
+    // ========== Section 1: Caching Methods ==========
 
     #[Test]
     public function it_uses_remember_method_to_cache_queries()
@@ -75,6 +94,8 @@ class CacheableBuilderTest extends TestCase
         $this->assertNotNull($post);
     }
 
+    // ========== Section 2: Cache Key Generation ==========
+
     #[Test]
     public function it_generates_unique_cache_keys_for_different_queries()
     {
@@ -97,160 +118,5 @@ class CacheableBuilderTest extends TestCase
 
         $this->assertCount(1, $publishedPosts);
         $this->assertCount(1, $unpublishedPosts);
-    }
-
-    #[Test]
-    public function it_invalidates_cache_on_mass_update()
-    {
-        // Create test data
-        Post::create([
-            'title' => 'Post 1',
-            'content' => 'Content 1',
-            'published' => false,
-        ]);
-
-        Post::create([
-            'title' => 'Post 2',
-            'content' => 'Content 2',
-            'published' => false,
-        ]);
-
-        // Cache the query
-        $posts = Post::where('published', false)->get();
-        $this->assertCount(2, $posts);
-
-        // Mass update
-        Post::where('published', false)->update(['published' => true]);
-
-        // Query again - should reflect the update
-        $unpublishedPosts = Post::where('published', false)->get();
-        $publishedPosts = Post::where('published', true)->get();
-
-        $this->assertCount(0, $unpublishedPosts);
-        $this->assertCount(2, $publishedPosts);
-    }
-
-    #[Test]
-    public function it_invalidates_cache_on_mass_delete()
-    {
-        // Create test data
-        Post::create([
-            'title' => 'Post 1',
-            'content' => 'Content 1',
-            'published' => true,
-        ]);
-
-        Post::create([
-            'title' => 'Post 2',
-            'content' => 'Content 2',
-            'published' => true,
-        ]);
-
-        // Cache the query
-        $posts = Post::where('published', true)->get();
-        $this->assertCount(2, $posts);
-
-        // Mass delete
-        Post::where('published', true)->delete();
-
-        // Query again - should reflect the deletion
-        $posts = Post::where('published', true)->get();
-        $this->assertCount(0, $posts);
-    }
-
-    #[Test]
-    public function it_can_bypass_cache_with_fresh_method()
-    {
-        // Create test data
-        $post = Post::create([
-            'title' => 'Original Title',
-            'content' => 'Content',
-            'published' => true,
-        ]);
-
-        // Cache the query
-        $cachedPost = Post::where('id', $post->id)->first();
-        $this->assertEquals('Original Title', $cachedPost->title);
-
-        // Update directly in database (bypass model events)
-        \DB::table('posts')->where('id', $post->id)->update(['title' => 'Updated Title']);
-
-        // Query with cache - should still get old title
-        $cachedPost = Post::where('id', $post->id)->first();
-        $this->assertEquals('Original Title', $cachedPost->title);
-
-        // Clear cache manually
-        Post::flushModelCache();
-
-        // Query again - should get new title
-        $freshPost = Post::where('id', $post->id)->first();
-        $this->assertEquals('Updated Title', $freshPost->title);
-    }
-
-    #[Test]
-    public function it_invalidates_cache_on_insert()
-    {
-        // Cache an empty query
-        $posts = Post::where('published', true)->get();
-        $this->assertCount(0, $posts);
-
-        // Insert new record using query builder
-        Post::query()->insert([
-            'title' => 'Inserted Post',
-            'content' => 'Content',
-            'published' => true,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        // Query again - should reflect the insertion
-        $posts = Post::where('published', true)->get();
-        $this->assertCount(1, $posts);
-    }
-
-    #[Test]
-    public function it_handles_increment_with_cache_invalidation()
-    {
-        // Create test data
-        $post = Post::create([
-            'title' => 'Test Post',
-            'content' => 'Content',
-            'published' => true,
-            'views' => 100,
-        ]);
-
-        // Cache the query
-        $cachedPost = Post::find($post->id);
-        $this->assertEquals(100, $cachedPost->views);
-
-        // Increment views
-        Post::where('id', $post->id)->increment('views', 50);
-
-        // Query again - should reflect the increment
-        $updatedPost = Post::find($post->id);
-        $this->assertEquals(150, $updatedPost->views);
-    }
-
-    #[Test]
-    public function it_handles_decrement_with_cache_invalidation()
-    {
-        // Create test data
-        $post = Post::create([
-            'title' => 'Test Post',
-            'content' => 'Content',
-            'published' => true,
-            'views' => 100,
-        ]);
-
-        // Cache the query
-        $cachedPost = Post::find($post->id);
-        $this->assertEquals(100, $cachedPost->views);
-
-        // Decrement views
-        Post::where('id', $post->id)->decrement('views', 30);
-
-        // Query again - should reflect the decrement
-        $updatedPost = Post::find($post->id);
-        $this->assertEquals(70, $updatedPost->views);
     }
 }

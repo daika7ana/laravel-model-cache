@@ -9,11 +9,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use YMigVal\LaravelModelCache\HasCachedQueriesWithRelationships;
+use YMigVal\LaravelModelCache\HasCachableModel;
 
 class PostWithRelationships extends Model
 {
-    use HasCachedQueriesWithRelationships, SoftDeletes;
+    use HasCachableModel, SoftDeletes;
 
     protected $table = 'posts';
 

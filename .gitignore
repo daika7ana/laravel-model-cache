@@ -5,6 +5,9 @@
 .phpunit.cache/
 .phpunit.result.cache
 
+# Debug logs
+debug.log
+
 # IDEs and editors
 /.fleet
 /.idea

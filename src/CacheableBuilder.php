@@ -136,12 +136,7 @@ class CacheableBuilder extends Builder
         $result = parent::touch($column);
 
         if ($result > 0) {
-            // Flush cache only when rows were actually touched
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                $this->flushQueryCache();
-            }
+            $this->flushModelOrQueryCache();
         }
     }
 
@@ -199,21 +194,6 @@ class CacheableBuilder extends Builder
     }
 
     /**
-     * Check if the cache driver supports tags.
-     *
-     * @param  \Illuminate\Contracts\Cache\Repository  $cache
-     * @return bool
-     */
-    protected function supportsTags($cache)
-    {
-        try {
-            return method_exists($cache, 'supportsTags') && $cache->supportsTags();
-        } catch (\Exception $e) {
-            return false;
-        }
-    }
-
-    /**
      * Set the cache duration.
      *
      * @param  int  $minutes
@@ -241,22 +221,6 @@ class CacheableBuilder extends Builder
         $this->cacheMinutes = 0;
 
         return $this;
-    }
-
-    /**
-     * Hash a value for cache identifiers.
-     *
-     * Prefer xxh128 when available for speed, with md5 fallback.
-     */
-    protected function hashIdentifier(string $value): string
-    {
-        if (self::$supportsXxh128 === null) {
-            self::$supportsXxh128 = in_array('xxh128', hash_algos(), true);
-        }
-
-        $algorithm = self::$supportsXxh128 ? 'xxh128' : 'md5';
-
-        return hash($algorithm, $value);
     }
 
     /**
@@ -384,31 +348,6 @@ class CacheableBuilder extends Builder
     }
 
     /**
-     * Get the cache tags for the query.
-     *
-     * @return array
-     */
-    protected function getCacheTags()
-    {
-        return [
-            'model_cache',
-            get_class($this->model),
-            $this->model->getTable(),
-        ];
-    }
-
-    /**
-     * Get the models without cache.
-     *
-     * @param  array  $columns
-     * @return Collection
-     */
-    protected function getWithoutCache($columns = ['*'])
-    {
-        return parent::get($columns);
-    }
-
-    /**
      * Override the get method to automatically use cache.
      *
      * @param  array  $columns
@@ -422,28 +361,6 @@ class CacheableBuilder extends Builder
         }
 
         return $this->getFromCache($columns);
-    }
-
-    /**
-     * Get the cache driver to use.
-     *
-     * @return Repository
-     */
-    protected function getCacheDriver()
-    {
-        try {
-            $cacheStore = config('model-cache.cache_store');
-
-            if ($cacheStore) {
-                return Cache::store($cacheStore);
-            }
-
-            return Cache::store();
-        } catch (\Exception $e) {
-            // If there's an issue with the configured cache driver,
-            // fall back to the default driver
-            return Cache::store(config('cache.default'));
-        }
     }
 
     /**
@@ -732,15 +649,8 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after mass update for model: ' . get_class($this->model));
-
-            // Try to flush the model cache
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                // Fallback to flushing the query cache
-                $this->flushQueryCache();
-            }
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `update` operation for model: ' . get_class($this->model));
+            $this->flushModelOrQueryCache();
         }
 
         return $result;
@@ -758,15 +668,8 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model if any records were deleted
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after mass delete for model: ' . get_class($this->model));
-
-            // Try to flush the model cache
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                // Fallback to flushing the query cache
-                $this->flushQueryCache();
-            }
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `delete` operation for model: ' . get_class($this->model));
+            $this->flushModelOrQueryCache();
         }
 
         return $result;
@@ -786,15 +689,8 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after increment operation for model: ' . get_class($this->model));
-
-            // Try to flush the model cache
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                // Fallback to flushing the query cache
-                $this->flushQueryCache();
-            }
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `increment` operation for model: ' . get_class($this->model));
+            $this->flushModelOrQueryCache();
         }
 
         return $result;
@@ -814,15 +710,8 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after decrement operation for model: ' . get_class($this->model));
-
-            // Try to flush the model cache
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                // Fallback to flushing the query cache
-                $this->flushQueryCache();
-            }
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `decrement` operation for model: ' . get_class($this->model));
+            $this->flushModelOrQueryCache();
         }
 
         return $result;
@@ -840,15 +729,8 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model if insert was successful
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after insert operation for model: ' . get_class($this->model));
-
-            // Try to flush the model cache
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                // Fallback to flushing the query cache
-                $this->flushQueryCache();
-            }
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `insert` operation for model: ' . get_class($this->model));
+            $this->flushModelOrQueryCache();
         }
 
         return $result;
@@ -866,15 +748,8 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model if any records were inserted
         if ($result > 0) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after insertOrIgnore operation for model: ' . get_class($this->model));
-
-            // Try to flush the model cache
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                // Fallback to flushing the query cache
-                $this->flushQueryCache();
-            }
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `insertOrIgnore` operation for model: ' . get_class($this->model));
+            $this->flushModelOrQueryCache();
         }
 
         return $result;
@@ -893,15 +768,8 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after insertGetId operation for model: ' . get_class($this->model));
-
-            // Try to flush the model cache
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                // Fallback to flushing the query cache
-                $this->flushQueryCache();
-            }
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `insertGetId` operation for model: ' . get_class($this->model));
+            $this->flushModelOrQueryCache();
         }
 
         return $result;
@@ -920,15 +788,8 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model if operation was successful
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after updateOrInsert operation for model: ' . get_class($this->model));
-
-            // Try to flush the model cache
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                // Fallback to flushing the query cache
-                $this->flushQueryCache();
-            }
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `updateOrInsert` operation for model: ' . get_class($this->model));
+            $this->flushModelOrQueryCache();
         }
 
         return $result;
@@ -953,15 +814,8 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model if any records were affected
         if ($result > 0) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after upsert operation for model: ' . get_class($this->model));
-
-            // Try to flush the model cache
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                // Fallback to flushing the query cache
-                $this->flushQueryCache();
-            }
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `upsert` operation for model: ' . get_class($this->model));
+            $this->flushModelOrQueryCache();
         }
 
         return $result;
@@ -978,15 +832,8 @@ class CacheableBuilder extends Builder
         parent::truncate();
 
         // Always flush the cache after truncate
-        resolve(ModelCacheDebugger::class)->info('Flushing cache after truncate operation for model: ' . get_class($this->model));
-
-        // Try to flush the model cache
-        if (method_exists($this->model, 'flushModelCache')) {
-            $this->model->flushModelCache();
-        } else {
-            // Fallback to flushing the query cache
-            $this->flushQueryCache();
-        }
+        resolve(ModelCacheDebugger::class)->info('Flushing cache after `truncate` operation for model: ' . get_class($this->model));
+        $this->flushModelOrQueryCache();
     }
 
     /**
@@ -1007,15 +854,8 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after force delete for model: ' . get_class($this->model));
-
-            // Try to flush the model cache
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                // Fallback to flushing the query cache
-                $this->flushQueryCache();
-            }
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `forceDelete` operation for model: ' . get_class($this->model));
+            $this->flushModelOrQueryCache();
         }
 
         return $result;
@@ -1039,17 +879,100 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after restore for model: ' . get_class($this->model));
-
-            // Try to flush the model cache
-            if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
-            } else {
-                // Fallback to flushing the query cache
-                $this->flushQueryCache();
-            }
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `restore` operation for model: ' . get_class($this->model));
+            $this->flushModelOrQueryCache();
         }
 
         return $result;
+    }
+
+    /**
+     * Check if the cache driver supports tags.
+     *
+     * @param  \Illuminate\Contracts\Cache\Repository  $cache
+     * @return bool
+     */
+    protected function supportsTags($cache)
+    {
+        try {
+            return method_exists($cache, 'supportsTags') && $cache->supportsTags();
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Flush model cache when available, otherwise flush query cache.
+     */
+    protected function flushModelOrQueryCache(): void
+    {
+        if (method_exists($this->model, 'flushModelCache')) {
+            $this->model->flushModelCache();
+        } else {
+            $this->flushQueryCache();
+        }
+    }
+
+    /**
+     * Hash a value for cache identifiers.
+     *
+     * Prefer xxh128 when available for speed, with md5 fallback.
+     */
+    protected function hashIdentifier(string $value): string
+    {
+        if (self::$supportsXxh128 === null) {
+            self::$supportsXxh128 = in_array('xxh128', hash_algos(), true);
+        }
+
+        $algorithm = self::$supportsXxh128 ? 'xxh128' : 'md5';
+
+        return hash($algorithm, $value);
+    }
+
+    /**
+     * Get the cache tags for the query.
+     *
+     * @return array
+     */
+    protected function getCacheTags()
+    {
+        return [
+            'model_cache',
+            get_class($this->model),
+            $this->model->getTable(),
+        ];
+    }
+
+    /**
+     * Get the models without cache.
+     *
+     * @param  array  $columns
+     * @return Collection
+     */
+    protected function getWithoutCache($columns = ['*'])
+    {
+        return parent::get($columns);
+    }
+
+    /**
+     * Get the cache driver to use.
+     *
+     * @return Repository
+     */
+    protected function getCacheDriver()
+    {
+        try {
+            $cacheStore = config('model-cache.cache_store');
+
+            if ($cacheStore) {
+                return Cache::store($cacheStore);
+            }
+
+            return Cache::store();
+        } catch (\Exception $e) {
+            // If there's an issue with the configured cache driver,
+            // fall back to the default driver
+            return Cache::store(config('cache.default'));
+        }
     }
 }

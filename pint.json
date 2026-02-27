@@ -11,6 +11,9 @@
         "clean_namespace": true,
         "concat_space": {
             "spacing": "one"
-        }
+        },
+        "protected_to_private": true,
+        "ordered_interfaces": true,
+        "ordered_class_elements": true
     }
 }

@@ -82,12 +82,24 @@ abstract class TestCase extends Orchestra
 
         $app['config']->set('cache.default', $cacheDriver);
 
+        // Configure logging to debug.log file when debug mode is enabled
+        if (env('MODEL_CACHE_DEBUG', false)) {
+            $debugLogPath = __DIR__ . '/../debug.log';
+
+            $app['config']->set('logging.default', 'debug_file');
+            $app['config']->set('logging.channels.debug_file', [
+                'driver' => 'single',
+                'path' => $debugLogPath,
+                'level' => 'debug',
+            ]);
+        }
+
         // Setup model-cache configuration
         $app['config']->set('model-cache.cache_duration', 60);
         $app['config']->set('model-cache.cache_key_prefix', 'test_cache_');
         $app['config']->set('model-cache.cache_store', env('MODEL_CACHE_STORE', null));
-        $app['config']->set('model-cache.enabled', true);
-        $app['config']->set('model-cache.debug_mode', false);
+        $app['config']->set('model-cache.enabled', env('MODEL_CACHE_ENABLED', true));
+        $app['config']->set('model-cache.debug_mode', env('MODEL_CACHE_DEBUG', false));
     }
 
     protected function usesDatabaseCacheDriver(): bool

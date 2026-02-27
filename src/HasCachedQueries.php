@@ -13,13 +13,6 @@ use Illuminate\Database\Query\Builder;
 trait HasCachedQueries
 {
     /**
-     * Cached model table names by class.
-     *
-     * @var array<string, string>
-     */
-    protected static array $modelTableCache = [];
-
-    /**
      * Create a new Eloquent query builder for the model.
      *
      * @param  Builder  $query
@@ -54,36 +47,19 @@ trait HasCachedQueries
      */
     public static function bootHasCachedQueries()
     {
-        foreach (['created', 'updated', 'deleted'] as $event) {
-            static::registerModelEvent($event, function (Model $model) use ($event) {
+        $debugger = resolve(ModelCacheDebugger::class);
+
+        foreach (['created', 'updated', 'deleted', 'restored'] as $event) {
+            static::registerModelEvent($event, function (Model $model) use ($event, $debugger) {
+                if ($model->newModelQuery() instanceof CacheableBuilder) {
+                    return;
+                }
+
                 static::flushModelCache();
 
-                resolve(ModelCacheDebugger::class)->info("Cache flushed after {$event} for model: " . get_class($model));
+                $debugger->info("Cache flushed after `{$event}` for model: " . get_class($model));
             });
         }
-
-        static::registerModelEvent('restored', function (Model $model) {
-            static::flushModelCache();
-
-            resolve(ModelCacheDebugger::class)->info('Cache flushed after restoration for model: ' . get_class($model));
-        });
-    }
-
-    /**
-     * Get model cache context values.
-     *
-     * @return array{0: string, 1: string}
-     */
-    protected static function getModelCacheContext(): array
-    {
-        $modelClass = static::class;
-
-        if (! isset(self::$modelTableCache[$modelClass])) {
-            $model = new static;
-            self::$modelTableCache[$modelClass] = $model->getTable();
-        }
-
-        return [$modelClass, self::$modelTableCache[$modelClass]];
     }
 
     /**
@@ -95,7 +71,8 @@ trait HasCachedQueries
     public static function flushModelCache()
     {
         try {
-            [$modelClass, $tableName] = static::getModelCacheContext();
+            $modelClass = static::class;
+            $tableName = (new static)->getTable();
 
             // Get the cache driver directly
             $cache = self::getStaticCacheDriver();

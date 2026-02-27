@@ -9,30 +9,14 @@ final class ModelCacheDebugger
      *
      * @var bool|null
      */
-    protected $debugModeEnabled = null;
+    private $debugModeEnabled = null;
 
     /**
      * Cached logger function availability lookup.
      *
      * @var bool|null
      */
-    protected $loggerFunctionAvailable = null;
-
-    /**
-     * Determine whether debug logging should run.
-     */
-    protected function shouldLogDebugMessages(): bool
-    {
-        if ($this->debugModeEnabled === null) {
-            $this->debugModeEnabled = (bool) config('model-cache.debug_mode', false);
-        }
-
-        if ($this->loggerFunctionAvailable === null) {
-            $this->loggerFunctionAvailable = function_exists('logger');
-        }
-
-        return $this->debugModeEnabled && $this->loggerFunctionAvailable;
-    }
+    private $loggerFunctionAvailable = null;
 
     /**
      * Log a debug-level message when enabled.
@@ -68,5 +52,21 @@ final class ModelCacheDebugger
         }
 
         logger()->error($message);
+    }
+
+    /**
+     * Determine whether debug logging should run.
+     */
+    private function shouldLogDebugMessages(): bool
+    {
+        if ($this->debugModeEnabled === null) {
+            $this->debugModeEnabled = (bool) config('model-cache.debug_mode', false);
+        }
+
+        if ($this->loggerFunctionAvailable === null) {
+            $this->loggerFunctionAvailable = function_exists('logger');
+        }
+
+        return $this->debugModeEnabled && $this->loggerFunctionAvailable;
     }
 }

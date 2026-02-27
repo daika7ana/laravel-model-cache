@@ -13,7 +13,7 @@ namespace YMigVal\LaravelModelCache;
  * @method joiningTable(string $related)
  * @method getKeyName()
  */
-trait ModelRelationships
+trait HasCachedRelationships
 {
     /**
      * Override the belongsToMany relationship method to return a custom
