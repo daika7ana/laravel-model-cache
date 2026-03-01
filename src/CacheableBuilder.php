@@ -10,13 +10,6 @@ use Illuminate\Support\Facades\Cache;
 class CacheableBuilder extends Builder
 {
     /**
-     * Cached xxh128 availability lookup.
-     *
-     * @var bool|null
-     */
-    protected static $supportsXxh128 = null;
-
-    /**
      * The number of minutes to cache the query.
      *
      * @var int
@@ -916,15 +909,11 @@ class CacheableBuilder extends Builder
     /**
      * Hash a value for cache identifiers.
      *
-     * Prefer xxh128 when available for speed, with md5 fallback.
+     * Uses configured hashing algorithm (default: xxh128).
      */
     protected function hashIdentifier(string $value): string
     {
-        if (self::$supportsXxh128 === null) {
-            self::$supportsXxh128 = in_array('xxh128', hash_algos(), true);
-        }
-
-        $algorithm = self::$supportsXxh128 ? 'xxh128' : 'md5';
+        $algorithm = strtolower((string) config('model-cache.hash_algorithm', 'xxh128'));
 
         return hash($algorithm, $value);
     }

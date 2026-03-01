@@ -97,6 +97,7 @@ abstract class TestCase extends Orchestra
         // Setup model-cache configuration
         $app['config']->set('model-cache.cache_duration', 60);
         $app['config']->set('model-cache.cache_key_prefix', 'test_cache_');
+        $app['config']->set('model-cache.hash_algorithm', env('MODEL_CACHE_HASH_ALGORITHM', 'xxh128'));
         $app['config']->set('model-cache.cache_store', env('MODEL_CACHE_STORE', null));
         $app['config']->set('model-cache.enabled', env('MODEL_CACHE_ENABLED', true));
         $app['config']->set('model-cache.debug_mode', env('MODEL_CACHE_DEBUG', false));

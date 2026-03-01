@@ -1,7 +1,7 @@
 {
     "name": "ymigval/laravel-model-cache",
     "description": "Laravel package for caching Eloquent model queries",
-    "homepage": "https://github.com/ymigval/laravel-model-cache",
+    "homepage": "https://github.com/daika7ana/laravel-model-cache",
     "keywords": [
         "redis",
         "php",
@@ -30,16 +30,16 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "require": {
-      "php": "^7.4|^8.0|^8.1|^8.2|^8.3",
+        "php": "^8.1",
         "illuminate/support": "^8.0|^9.0|^10.0|^11.0|^12.0",
         "illuminate/database": "^8.0|^9.0|^10.0|^11.0|^12.0",
         "illuminate/cache": "^8.0|^9.0|^10.0|^11.0|^12.0",
-      "ext-json": "*"
+        "ext-json": "*"
     },
     "require-dev": {
         "orchestra/testbench": "^6.0|^7.0|^8.0|^9.0|^10.0",
         "phpunit/phpunit": "^9.0|^10.0|^11.0",
-        "friendsofphp/php-cs-fixer": "^3.0"
+        "laravel/pint": "^1.27"
     },
     "autoload": {
         "psr-4": {
@@ -53,8 +53,8 @@
     },
     "scripts": {
         "test": "vendor/bin/phpunit",
-        "check-style": "vendor/bin/php-cs-fixer fix --dry-run",
-        "fix-style": "vendor/bin/php-cs-fixer fix"
+        "check-style": "vendor/bin/pint --test",
+        "fix-style": "vendor/bin/pint --dirty"
     },
     "extra": {
         "laravel": {

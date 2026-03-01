@@ -119,4 +119,25 @@ class CacheableBuilderTest extends TestCase
         $this->assertCount(1, $publishedPosts);
         $this->assertCount(1, $unpublishedPosts);
     }
+
+    #[Test]
+    public function it_uses_configured_hash_algorithm_for_cache_keys()
+    {
+        config()->set('model-cache.hash_algorithm', 'sha1');
+
+        $cacheKey = Post::query()->where('published', true)->getCacheKey();
+
+        $this->assertSame(40, strlen($cacheKey));
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{40}$/', $cacheKey);
+    }
+
+    #[Test]
+    public function it_throws_for_invalid_hash_algorithm()
+    {
+        config()->set('model-cache.hash_algorithm', 'not-a-real-hash');
+
+        $this->expectException(\ValueError::class);
+
+        Post::query()->where('published', true)->getCacheKey();
+    }
 }
