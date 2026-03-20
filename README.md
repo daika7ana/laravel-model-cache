@@ -20,7 +20,7 @@ Cache Eloquent queries with minimal code changes and automatic invalidation.
 ## Requirements
 
 - PHP `^8.1`
-- Laravel `8.x` through `12.x`
+- Laravel `8.x` through `13.x`
 
 ## Quick Start
 
