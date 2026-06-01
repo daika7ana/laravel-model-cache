@@ -25,8 +25,23 @@ For many-to-many operations, add `HasCachedRelationships` and use:
 - `attachRelationshipAndFlushCache(...)`
 - `detachRelationshipAndFlushCache(...)`
 
+## Cache driver failures
+
+If the cache driver (Redis, Memcached) becomes unavailable, the package falls through to the database automatically. Your application continues working — errors are logged but queries are not blocked. Check your logs for `Cache read failed` messages.
+
+## Stale data during high traffic
+
+If you see stale data under heavy load, enable stampede prevention:
+
+```env
+MODEL_CACHE_USE_LOCKS=true
+```
+
+This prevents multiple concurrent requests from all missing the cache simultaneously and overwhelming the database.
+
 ## Safe debugging flow
 
 1. Run: `php artisan mcache:flush`
 2. Re-run the query and verify data freshness.
 3. Confirm your model traits and cache driver setup.
+4. Enable `debug_mode` temporarily to see cache key generation and flush operations in your logs.

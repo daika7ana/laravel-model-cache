@@ -28,9 +28,15 @@ trait HasCachedRelationships
      * @param  string|null  $relation
      * @return \YMigVal\LaravelModelCache\CachingBelongsToMany
      */
-    public function belongsToMany($related, $table = null, $foreignPivotKey = null, $relatedPivotKey = null,
-        $parentKey = null, $relatedKey = null, $relation = null)
-    {
+    public function belongsToMany(
+        $related,
+        $table = null,
+        $foreignPivotKey = null,
+        $relatedPivotKey = null,
+        $parentKey = null,
+        $relatedKey = null,
+        $relation = null,
+    ) {
         // Get the original relationship instance
         $instance = $this->newRelatedInstance($related);
 
@@ -57,7 +63,7 @@ trait HasCachedRelationships
             $parentKey ?: $this->getKeyName(),
             $relatedKey ?: $instance->getKeyName(),
             $relation,
-            $this
+            $this,
         );
     }
 

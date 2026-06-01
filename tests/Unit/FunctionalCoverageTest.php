@@ -7,8 +7,6 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithCustomCache;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithoutCache;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Tag;
 use YMigVal\LaravelModelCache\Tests\TestCase;
 
 /**
@@ -185,7 +183,7 @@ class FunctionalCoverageTest extends TestCase
 
         Post::query()->upsert(
             [['title' => 'Upserted', 'content' => 'Content', 'published' => true, 'created_at' => now(), 'updated_at' => now()]],
-            ['id']
+            ['id'],
         );
 
         DB::enableQueryLog();
@@ -201,7 +199,7 @@ class FunctionalCoverageTest extends TestCase
 
         Post::query()->updateOrInsert(
             ['title' => 'New Post'],
-            ['content' => 'Content', 'published' => true, 'created_at' => now(), 'updated_at' => now()]
+            ['content' => 'Content', 'published' => true, 'created_at' => now(), 'updated_at' => now()],
         );
 
         DB::enableQueryLog();

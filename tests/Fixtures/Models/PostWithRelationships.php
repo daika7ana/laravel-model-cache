@@ -13,7 +13,8 @@ use YMigVal\LaravelModelCache\HasCacheableModel;
 
 class PostWithRelationships extends Model
 {
-    use HasCacheableModel, SoftDeletes;
+    use HasCacheableModel;
+    use SoftDeletes;
 
     protected $table = 'posts';
 

@@ -16,11 +16,15 @@ Cache Eloquent queries with minimal code changes and automatic invalidation.
 - Supports explicit cache methods (`getFromCache()`, `firstFromCache()`) when you want more explicit code.
 - Flushes cache on create/update/delete/restore model events.
 - Supports relationship-aware invalidation via `HasCachedRelationships`.
+- **Fail-open** — if the cache driver is unavailable, queries fall through to the database instead of crashing.
+- **Transaction-aware** — cache invalidation is deferred until the transaction commits, avoiding unnecessary flushes on rollback.
+- **Stampede prevention** — optional cache locking prevents multiple concurrent requests from hitting the database simultaneously on cache miss.
+- **Per-model configuration** — configure cache duration, prefix, and lock duration per model.
 
 ## Requirements
 
-- PHP `^8.1`
-- Laravel `8.x` through `13.x`
+- PHP `^8.2`
+- Laravel `11.x` through `13.x`
 
 ## Quick Start
 
@@ -46,6 +50,7 @@ class Post extends Model
 
     protected $cacheMinutes = 120;
     protected $cachePrefix = 'posts_';
+    protected $cacheLockSeconds = 15; // optional: override stampede lock duration
 }
 ```
 

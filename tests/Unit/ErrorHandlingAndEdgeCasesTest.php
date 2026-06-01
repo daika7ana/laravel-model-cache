@@ -5,11 +5,9 @@ namespace YMigVal\LaravelModelCache\Tests\Unit;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
-use YMigVal\LaravelModelCache\CacheableBuilder;
 use YMigVal\LaravelModelCache\ModelCacheDebugger;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithoutCache;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Tag;
 use YMigVal\LaravelModelCache\Tests\TestCase;
 

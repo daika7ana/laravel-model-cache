@@ -62,6 +62,10 @@ In `config/model-cache.php` you can tune:
 - `hash_algorithm` — algorithm for cache key hashing (default: `xxh128`)
 - `include_locale_in_key` — include app locale in cache key for multilingual sites (default: `false`)
 - `debug_mode` — log cache key generation and flush operations (default: `false`)
+- `use_cache_locks` — enable stampede prevention locking (default: `false`)
+- `cache_lock_seconds` — lock duration in seconds for stampede prevention (default: `10`)
+
+> **Note:** Errors and warnings are always logged regardless of `debug_mode`. Only `debug` and `info` level messages are gated behind the debug flag.
 
 Example:
 
@@ -69,4 +73,6 @@ Example:
 'cache_store' => env('MODEL_CACHE_STORE', null),
 'include_locale_in_key' => env('MODEL_CACHE_INCLUDE_LOCALE', false),
 'debug_mode' => env('MODEL_CACHE_DEBUG', false),
+'use_cache_locks' => env('MODEL_CACHE_USE_LOCKS', false),
+'cache_lock_seconds' => (int) env('MODEL_CACHE_LOCK_SECONDS', 10),
 ```

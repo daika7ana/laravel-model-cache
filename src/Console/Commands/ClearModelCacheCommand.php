@@ -90,7 +90,7 @@ class ClearModelCacheCommand extends Command
             $this->components->info('No static methods found. Trying with instance methods...');
 
             // If no static methods, try instance methods
-            $model = new $modelClass;
+            $model = new $modelClass();
             $tableName = $model->getTable();
             $this->components->info("Model table: {$tableName}");
 

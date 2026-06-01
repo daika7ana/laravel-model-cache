@@ -28,13 +28,26 @@ class CachingBelongsToMany extends BelongsToMany
      * @param  Model  $cacheableParent
      * @return void
      */
-    public function __construct($query, $parent, $table, $foreignPivotKey,
-        $relatedPivotKey, $parentKey, $relatedKey,
-        $relationName = null, $cacheableParent = null)
-    {
+    public function __construct(
+        $query,
+        $parent,
+        $table,
+        $foreignPivotKey,
+        $relatedPivotKey,
+        $parentKey,
+        $relatedKey,
+        $relationName = null,
+        $cacheableParent = null,
+    ) {
         parent::__construct(
-            $query, $parent, $table, $foreignPivotKey,
-            $relatedPivotKey, $parentKey, $relatedKey, $relationName
+            $query,
+            $parent,
+            $table,
+            $foreignPivotKey,
+            $relatedPivotKey,
+            $parentKey,
+            $relatedKey,
+            $relationName,
         );
 
         // Store the parent model that has the cache trait

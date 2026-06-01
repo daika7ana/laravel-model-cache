@@ -75,7 +75,32 @@ return [
     |
     | When enabled, this will log detailed information about cache keys and
     | queries being cached. Useful for troubleshooting cache-related issues.
+    | Note: Errors and warnings are always logged regardless of this setting.
     |
     */
     'debug_mode' => (bool) env('MODEL_CACHE_DEBUG', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Use Cache Locks (Stampede Prevention)
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, cache misses will acquire a lock before executing the
+    | database query. This prevents multiple concurrent requests from all
+    | hitting the database simultaneously when a cache key expires.
+    | Requires a lock-capable cache driver (Redis, Memcached, database).
+    |
+    */
+    'use_cache_locks' => (bool) env('MODEL_CACHE_USE_LOCKS', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cache Lock Duration (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | The maximum number of seconds a cache stampede lock is held.
+    | Should be longer than the slowest expected query.
+    |
+    */
+    'cache_lock_seconds' => (int) env('MODEL_CACHE_LOCK_SECONDS', 5),
 ];

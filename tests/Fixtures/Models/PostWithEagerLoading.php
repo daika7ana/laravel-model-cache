@@ -10,7 +10,8 @@ use YMigVal\LaravelModelCache\HasCachedQueries;
 
 class PostWithEagerLoading extends Model
 {
-    use HasCachedQueries, SoftDeletes;
+    use HasCachedQueries;
+    use SoftDeletes;
 
     protected $table = 'posts';
 

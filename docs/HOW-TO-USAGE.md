@@ -19,6 +19,14 @@ class Post extends Model
 }
 ```
 
+### Per-model properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `$cacheMinutes` | `int\|null` | Cache duration in minutes. `null` uses `config('model-cache.cache_duration')`. |
+| `$cachePrefix` | `string\|null` | Custom cache key prefix. `null` uses `config('model-cache.cache_key_prefix')`. |
+| `$cacheLockSeconds` | `int\|null` | Stampede lock duration in seconds. `null` uses `config('model-cache.cache_lock_seconds')`. |
+
 ## 2) Use regular Eloquent methods (implicit caching)
 
 ```php
@@ -74,4 +82,41 @@ Then use helper methods:
 $post->syncRelationshipAndFlushCache('tags', [1, 2, 3]);
 $post->attachRelationshipAndFlushCache('tags', [4, 5]);
 $post->detachRelationshipAndFlushCache('tags', [1]);
+```
+
+## 7) Stampede prevention (optional)
+
+When a popular cache key expires, multiple concurrent requests can all miss and hit the database simultaneously. Enable cache locking to prevent this:
+
+```env
+MODEL_CACHE_USE_LOCKS=true
+MODEL_CACHE_LOCK_SECONDS=10
+```
+
+Or set a per-model lock duration:
+
+```php
+class Post extends Model
+{
+    use HasCachedQueries;
+
+    protected $cacheLockSeconds = 15; // override config for this model
+}
+```
+
+## 8) Transaction-aware invalidation
+
+Cache invalidation is automatically deferred when inside a database transaction. If the transaction rolls back, the cache is not flushed:
+
+```php
+DB::transaction(function () {
+    $post = Post::create(['title' => 'New Post', 'content' => 'Content']);
+
+    // Cache is NOT flushed yet — it waits for the transaction to commit
+    $post->update(['title' => 'Updated Title']);
+
+    // If an exception is thrown here, the cache remains valid
+});
+
+// Cache is flushed once, after the transaction commits successfully
 ```

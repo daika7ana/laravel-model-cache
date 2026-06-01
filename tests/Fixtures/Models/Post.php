@@ -8,7 +8,8 @@ use YMigVal\LaravelModelCache\HasCachedQueries;
 
 class Post extends Model
 {
-    use HasCachedQueries, SoftDeletes;
+    use HasCachedQueries;
+    use SoftDeletes;
 
     protected $fillable = [
         'title',

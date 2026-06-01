@@ -5,6 +5,7 @@ namespace YMigVal\LaravelModelCache;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * @property ?int $cacheMinutes
@@ -24,6 +25,7 @@ trait HasCachedQueries
             $query,
             $this->cacheMinutes ?? null,
             $this->cachePrefix ?? null,
+            $this->cacheLockSeconds ?? null,
         );
     }
 
@@ -51,9 +53,17 @@ trait HasCachedQueries
 
         foreach (['created', 'updated', 'deleted', 'restored'] as $event) {
             static::registerModelEvent($event, function (Model $model) use ($event, $debugger) {
-                static::flushModelCache();
+                $flush = function () use ($model, $event, $debugger) {
+                    static::flushModelCache();
+                    $debugger->info("Cache flushed after `{$event}` for model: " . get_class($model));
+                };
 
-                $debugger->info("Cache flushed after `{$event}` for model: " . get_class($model));
+                // Defer flush until transaction commits to avoid flushing on rollback
+                if (function_exists('DB') && DB::transactionLevel() > 0) {
+                    DB::afterCommit($flush);
+                } else {
+                    $flush();
+                }
             });
         }
     }
@@ -70,7 +80,7 @@ trait HasCachedQueries
 
         try {
             $modelClass = static::class;
-            $tableName = (new static)->getTable();
+            $tableName = (new static())->getTable();
 
             // Get the cache driver directly
             $cache = self::getStaticCacheDriver();

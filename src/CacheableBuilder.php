@@ -6,6 +6,7 @@ use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Contracts\CacheableBuilderContract
 {
@@ -31,10 +32,19 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     protected $cacheDriver;
 
-    public function __construct($builder, $cacheMinutes = null, $cachePrefix = null)
+    /**
+     * Per-model cache lock duration in seconds for stampede prevention.
+     * Overrides config('model-cache.cache_lock_seconds') when set.
+     *
+     * @var int|null
+     */
+    protected $cacheLockSeconds;
+
+    public function __construct($builder, $cacheMinutes = null, $cachePrefix = null, $cacheLockSeconds = null)
     {
         $this->cacheMinutes = $cacheMinutes;
         $this->cachePrefix = $cachePrefix;
+        $this->cacheLockSeconds = $cacheLockSeconds;
         parent::__construct($builder);
     }
 
@@ -61,14 +71,17 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function firstFromCache($columns = ['*'])
     {
-        // Check if caching is globally enabled
+        // Check if caching is globally disabled
         if (config('model-cache.enabled', true) === false) {
-            $results = $this->take(1)->getWithoutCache($columns);
-
-            return count($results) > 0 ? $results->first() : null;
+            return $this->clone()->take(1)->getWithoutCache($columns)->first();
         }
 
-        $results = $this->take(1)->getFromCache($columns);
+        // Check if caching is disabled for this query
+        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
+            return $this->clone()->take(1)->getWithoutCache($columns)->first();
+        }
+
+        $results = $this->clone()->take(1)->getFromCache($columns);
 
         return count($results) > 0 ? $results->first() : null;
     }
@@ -81,7 +94,6 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function getFromCache($columns = ['*']): Collection
     {
-        // Check if caching is globally enabled
         if (config('model-cache.enabled', true) === false) {
             return $this->getWithoutCache($columns);
         }
@@ -91,19 +103,17 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
         $cacheTags = $this->getCacheTags();
         $cache = $this->getCacheDriver();
 
-        // Check if the cache driver supports tags
-        $supportsTags = $this->supportsTags($cache);
-
-        if ($cacheTags && $supportsTags) {
-            return $cache->tags($cacheTags)->remember($cacheKey, $minutes * 60, function () use ($columns) {
+        try {
+            return $this->rememberWithLock($cacheKey, $minutes * 60, function () use ($columns) {
                 return $this->getWithoutCache($columns);
-            });
-        }
+            }, $cacheTags);
+        } catch (\Exception $e) {
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->error("Cache read failed, bypassing cache: {$e->getMessage()}");
+            }
 
-        // Fallback for drivers that don't support tagging
-        return $cache->remember($cacheKey, $minutes * 60, function () use ($columns) {
             return $this->getWithoutCache($columns);
-        });
+        }
     }
 
     /**
@@ -191,59 +201,33 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function flushQueryCache($columns = ['*']): bool
     {
+        $debugger = resolve(ModelCacheDebugger::class);
+
         try {
-            // Get the specific key for this query
             $cacheKey = $this->getCacheKey($columns);
             $cache = $this->getCacheDriver();
-            $sql = $this->toSql();
-            $bindings = $this->getBindings();
-            $serializedBindings = serialize($bindings);
 
-            // Log the operation if logger is available
-            $debugger = resolve(ModelCacheDebugger::class);
             $debugger->info("Flushing specific query cache: {$cacheKey}");
-            $debugger->debug("SQL: {$sql}");
-            $debugger->debug('Bindings: ' . json_encode($bindings));
 
-            $success = false;
-
-            // First try to forget this specific key
+            // Try to forget this specific key
             $result = $cache->forget($cacheKey);
             if ($result) {
-                $success = true;
                 $debugger->debug("Successfully removed specific cache key: {$cacheKey}");
             }
 
-            // Also try with tags if supported
+            // Try with tags if supported
             $cacheTags = $this->getCacheTags();
             if ($cacheTags && $this->supportsTags($cache)) {
                 try {
-                    // First try model-specific tags
                     $cache->tags($cacheTags)->flush();
-
-                    // Then try query-specific tags to be even more precise
-                    $queryTags = $cacheTags;
-                    $queryTags[] = $this->hashIdentifier($sql . $serializedBindings);
-                    $cache->tags($queryTags)->flush();
-
-                    $success = true;
+                    $result = true;
                     $debugger->debug('Successfully flushed cache using tags for model: ' . get_class($this->model));
                 } catch (\Exception $e) {
-                    // If this fails, we already tried the direct key removal above
-                    $debugger->debug("Could not flush by query tags: {$e->getMessage()}");
+                    $debugger->debug("Could not flush by tags: {$e->getMessage()}");
                 }
             }
 
-            // If both specific key and tags failed, try to flush related model cache
-            if (! $success) {
-                if (method_exists($this->model, 'flushModelCache')) {
-                    $this->model->flushModelCache();
-                    $success = true;
-                    $debugger->info('Flushed entire model cache for: ' . get_class($this->model));
-                }
-            }
-
-            return $success || $result;
+            return $result;
         } catch (\Exception $e) {
             $debugger->error("Error flushing query cache: {$e->getMessage()}");
 
@@ -270,7 +254,12 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function get($columns = ['*'])
     {
-        // Only use cache if cacheMinutes is not set to 0
+        // Fast path: caching disabled globally
+        if (config('model-cache.enabled', true) === false) {
+            return parent::get($columns);
+        }
+
+        // Fast path: explicitly disabled for this query
         if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
             return $this->getWithoutCache($columns);
         }
@@ -289,6 +278,10 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function paginateFromCache($perPage = null, $columns = ['*'], $pageName = 'page', $page = null)
     {
+        if (config('model-cache.enabled', true) === false) {
+            return parent::paginate($perPage, $columns, $pageName, $page);
+        }
+
         $page = $page ?: \Illuminate\Pagination\Paginator::resolveCurrentPage($pageName);
 
         $perPage = $perPage ?: $this->model->getPerPage();
@@ -310,38 +303,18 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
         };
 
         try {
-            // Check if the cache driver supports tags
             if ($cacheTags && $this->supportsTags($cache)) {
                 return $cache->tags($cacheTags)->remember($cacheKey, $minutes * 60, $callback);
             }
-        } catch (\BadMethodCallException $e) {
-            // If tags are not supported, we'll fall through to the default behavior
+
+            return $cache->remember($cacheKey, $minutes * 60, $callback);
+        } catch (\Exception $e) {
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->error("Cache read failed for paginate, bypassing cache: {$e->getMessage()}");
+            }
+
+            return $callback();
         }
-
-        return $cache->remember($cacheKey, $minutes * 60, $callback);
-    }
-
-    /**
-     * Execute an aggregate query with caching support.
-     *
-     * @param  string  $method  The aggregate method name (count, sum, min, max, avg)
-     * @param  string  $column  The column to aggregate
-     * @return mixed
-     */
-    protected function aggregateFromCache(string $method, string $column)
-    {
-        $cacheKey = $this->getCacheKey([$method, $column]);
-        $minutes = $this->cacheMinutes ?: config('model-cache.cache_duration', 60);
-        $cacheTags = $this->getCacheTags();
-        $cache = $this->getCacheDriver();
-
-        $callback = fn () => parent::{$method}($column);
-
-        if ($cacheTags && $this->supportsTags($cache)) {
-            return $cache->tags($cacheTags)->remember($cacheKey, $minutes * 60, $callback);
-        }
-
-        return $cache->remember($cacheKey, $minutes * 60, $callback);
     }
 
     /**
@@ -764,6 +737,107 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
     }
 
     /**
+     * Execute a cache read with optional stampede prevention locking.
+     */
+    protected function rememberWithLock(string $cacheKey, int $seconds, callable $callback, ?array $cacheTags = null)
+    {
+        if (! config('model-cache.use_cache_locks', false)) {
+            if ($cacheTags && $this->supportsTags($this->getCacheDriver())) {
+                return $this->getCacheDriver()->tags($cacheTags)->remember($cacheKey, $seconds, $callback);
+            }
+
+            return $this->getCacheDriver()->remember($cacheKey, $seconds, $callback);
+        }
+
+        $cache = $this->getCacheDriver();
+        $lockKey = "stampede:{$cacheKey}";
+        $lockDuration = $this->cacheLockSeconds ?? config('model-cache.cache_lock_seconds', 10);
+
+        // Try to get existing cached value first
+        try {
+            if ($cacheTags && $this->supportsTags($cache)) {
+                $cached = $cache->tags($cacheTags)->get($cacheKey);
+            } else {
+                $cached = $cache->get($cacheKey);
+            }
+
+            if ($cached !== null) {
+                return $cached;
+            }
+        } catch (\Exception $e) {
+            // Cache miss or error — proceed to lock
+        }
+
+        // Acquire lock to prevent stampede
+        $lock = $cache->lock($lockKey, $lockDuration);
+
+        if ($lock->get()) {
+            try {
+                $result = $callback();
+
+                if ($cacheTags && $this->supportsTags($cache)) {
+                    $cache->tags($cacheTags)->put($cacheKey, $result, $seconds);
+                } else {
+                    $cache->put($cacheKey, $result, $seconds);
+                }
+
+                return $result;
+            } finally {
+                $lock->release();
+            }
+        }
+
+        // Another request is computing — wait briefly and re-read
+        usleep(100000); // 100ms
+
+        try {
+            if ($cacheTags && $this->supportsTags($cache)) {
+                return $cache->tags($cacheTags)->get($cacheKey);
+            }
+
+            return $cache->get($cacheKey);
+        } catch (\Exception $e) {
+            // If re-read fails, just execute the query directly
+            return $callback();
+        }
+    }
+
+    /**
+     * Execute an aggregate query with caching support.
+     *
+     * @param  string  $method  The aggregate method name (count, sum, min, max, avg)
+     * @param  string  $column  The column to aggregate
+     * @return mixed
+     */
+    protected function aggregateFromCache(string $method, string $column)
+    {
+        if (config('model-cache.enabled', true) === false) {
+            return parent::{$method}($column);
+        }
+
+        $cacheKey = $this->getCacheKey([$method, $column]);
+        $minutes = $this->cacheMinutes ?: config('model-cache.cache_duration', 60);
+        $cacheTags = $this->getCacheTags();
+        $cache = $this->getCacheDriver();
+
+        $callback = fn() => parent::{$method}($column);
+
+        try {
+            if ($cacheTags && $this->supportsTags($cache)) {
+                return $cache->tags($cacheTags)->remember($cacheKey, $minutes * 60, $callback);
+            }
+
+            return $cache->remember($cacheKey, $minutes * 60, $callback);
+        } catch (\Exception $e) {
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->error("Cache read failed for {$method}, bypassing cache: {$e->getMessage()}");
+            }
+
+            return $callback();
+        }
+    }
+
+    /**
      * Check if the cache driver supports tags.
      *
      * @param  \Illuminate\Contracts\Cache\Repository  $cache
@@ -783,10 +857,18 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     protected function flushModelOrQueryCache(): void
     {
-        if (method_exists($this->model, 'flushModelCache')) {
-            $this->model->flushModelCache();
+        $flush = function () {
+            if (method_exists($this->model, 'flushModelCache')) {
+                $this->model->flushModelCache();
+            } else {
+                $this->flushQueryCache();
+            }
+        };
+
+        if (DB::transactionLevel() > 0) {
+            DB::afterCommit($flush);
         } else {
-            $this->flushQueryCache();
+            $flush();
         }
     }
 

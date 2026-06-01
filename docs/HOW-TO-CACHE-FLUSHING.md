@@ -28,3 +28,7 @@ $user?->flushCache();
 - After large data imports that bypass Eloquent events
 - After deployments with schema/query changes
 - During debugging of stale reads
+
+## Transaction-aware invalidation
+
+Cache invalidation is automatically deferred when inside `DB::transaction()`. The cache is only flushed after the transaction commits successfully. If the transaction rolls back, the cache remains valid — no manual intervention needed.
