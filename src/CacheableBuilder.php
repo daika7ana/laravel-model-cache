@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Cache;
 
-class CacheableBuilder extends Builder
+class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Contracts\CacheableBuilderContract
 {
     /**
      * The number of minutes to cache the query.
@@ -24,98 +24,18 @@ class CacheableBuilder extends Builder
      */
     protected $cachePrefix;
 
+    /**
+     * Cached cache driver instance.
+     *
+     * @var \Illuminate\Contracts\Cache\Repository|null
+     */
+    protected $cacheDriver;
+
     public function __construct($builder, $cacheMinutes = null, $cachePrefix = null)
     {
         $this->cacheMinutes = $cacheMinutes;
         $this->cachePrefix = $cachePrefix;
         parent::__construct($builder);
-    }
-
-    /**
-     * Save a new model and return the instance.
-     *
-     * @return \Illuminate\Database\Eloquent\Model|$this
-     */
-    public function save(array $attributes = [])
-    {
-        $instance = $this->newModelInstance($attributes);
-
-        $instance->save();
-
-        return $instance;
-    }
-
-    /**
-     * Save a new model without mass assignment protection and return the instance.
-     *
-     * @return \Illuminate\Database\Eloquent\Model|$this
-     */
-    public function forceSave(array $attributes = [])
-    {
-        $instance = $this->newModelInstance();
-
-        $instance->forceFill($attributes)->save();
-
-        return $instance;
-    }
-
-    /**
-     * Save a collection of models to the database.
-     *
-     * @param  array|\Illuminate\Support\Collection  $models
-     * @return array|\Illuminate\Support\Collection
-     */
-    public function saveMany($models)
-    {
-        foreach ($models as $model) {
-            $model->save();
-        }
-
-        return $models;
-    }
-
-    /**
-     * Create multiple instances of the model.
-     *
-     * @return \Illuminate\Database\Eloquent\Collection
-     */
-    public function createMany(array $records)
-    {
-        $instances = new Collection;
-
-        foreach ($records as $record) {
-            $instances->push($this->create($record));
-        }
-
-        return $instances;
-    }
-
-    /**
-     * Update records in the database without raising any events.
-     *
-     * @return int
-     */
-    public function updateQuietly(array $values)
-    {
-        $result = $this->model->withoutEvents(function () use ($values) {
-            return $this->update($values);
-        });
-
-        return $result;
-    }
-
-    /**
-     * Delete records from the database without raising any events.
-     *
-     * @return mixed
-     */
-    public function deleteQuietly()
-    {
-        $result = $this->model->withoutEvents(function () {
-            return $this->delete();
-        });
-
-        return $result;
     }
 
     /**
@@ -159,7 +79,7 @@ class CacheableBuilder extends Builder
      * @param  array  $columns
      * @return \Illuminate\Database\Eloquent\Collection
      */
-    public function getFromCache($columns = ['*'])
+    public function getFromCache($columns = ['*']): Collection
     {
         // Check if caching is globally enabled
         if (config('model-cache.enabled', true) === false) {
@@ -222,7 +142,7 @@ class CacheableBuilder extends Builder
      * @param  array  $columns
      * @return string
      */
-    public function getCacheKey($columns = ['*'])
+    public function getCacheKey($columns = ['*']): string
     {
         // This is the prefix defined in our package config
         $configPrefix = $this->cachePrefix ?? config('model-cache.cache_key_prefix', 'model_cache_');
@@ -232,21 +152,23 @@ class CacheableBuilder extends Builder
             $configPrefix,
             $this->model->getTable(),
             $this->toSql(),
-            serialize($this->getBindings()),
-            serialize($columns),
-            app()->getLocale(), // Add locale for multilingual sites
+            json_encode($this->getBindings()),
+            json_encode($columns),
+            config('model-cache.include_locale_in_key', false) ? app()->getLocale() : null,
         ];
 
         // Include eager loaded relationships in the cache key
         if (count($this->eagerLoad) > 0) {
-            $keyComponents[] = 'with:' . serialize(array_keys($this->eagerLoad));
+            $keyComponents[] = 'with:' . json_encode(array_keys($this->eagerLoad));
         }
 
         // Create a hash from all components
         $uniqueKey = $this->hashIdentifier(implode('|', $keyComponents));
 
         // Add debug logging if enabled
-        resolve(ModelCacheDebugger::class)->debug("Generated cache key: {$uniqueKey} for query: {$this->toSql()} with bindings: " . json_encode($this->getBindings()) . ' and relations: ' . json_encode(array_keys($this->eagerLoad)));
+        if (config('model-cache.debug_mode', false)) {
+            resolve(ModelCacheDebugger::class)->debug("Generated cache key: {$uniqueKey} for query: {$this->toSql()} with bindings: " . json_encode($this->getBindings()) . ' and relations: ' . json_encode(array_keys($this->eagerLoad)));
+        }
 
         // Return only the unique hash - Laravel will handle adding its own prefix
         return $uniqueKey;
@@ -267,7 +189,7 @@ class CacheableBuilder extends Builder
      * @param  array  $columns
      * @return bool
      */
-    public function flushQueryCache($columns = ['*'])
+    public function flushQueryCache($columns = ['*']): bool
     {
         try {
             // Get the specific key for this query
@@ -400,31 +322,37 @@ class CacheableBuilder extends Builder
     }
 
     /**
-     * Retrieve the "count" result of the query from cache.
+     * Execute an aggregate query with caching support.
      *
-     * @param  string  $columns
-     * @return int
+     * @param  string  $method  The aggregate method name (count, sum, min, max, avg)
+     * @param  string  $column  The column to aggregate
+     * @return mixed
      */
-    public function countFromCache($columns = '*')
+    protected function aggregateFromCache(string $method, string $column)
     {
-        $cacheKey = $this->getCacheKey([
-            'count',
-            is_array($columns) ? implode(',', $columns) : $columns,
-        ]);
-
+        $cacheKey = $this->getCacheKey([$method, $column]);
         $minutes = $this->cacheMinutes ?: config('model-cache.cache_duration', 60);
         $cacheTags = $this->getCacheTags();
         $cache = $this->getCacheDriver();
 
-        $callback = function () use ($columns) {
-            return parent::count($columns);
-        };
+        $callback = fn () => parent::{$method}($column);
 
         if ($cacheTags && $this->supportsTags($cache)) {
             return $cache->tags($cacheTags)->remember($cacheKey, $minutes * 60, $callback);
         }
 
         return $cache->remember($cacheKey, $minutes * 60, $callback);
+    }
+
+    /**
+     * Retrieve the "count" result of the query from cache.
+     *
+     * @param  string  $columns
+     * @return int
+     */
+    public function countFromCache($columns = '*'): int
+    {
+        return $this->aggregateFromCache('count', is_array($columns) ? implode(',', $columns) : $columns);
     }
 
     /**
@@ -435,24 +363,7 @@ class CacheableBuilder extends Builder
      */
     public function sumFromCache($column)
     {
-        $cacheKey = $this->getCacheKey([
-            'sum',
-            $column,
-        ]);
-
-        $minutes = $this->cacheMinutes ?: config('model-cache.cache_duration', 60);
-        $cacheTags = $this->getCacheTags();
-        $cache = $this->getCacheDriver();
-
-        $callback = function () use ($column) {
-            return parent::sum($column);
-        };
-
-        if ($cacheTags && $this->supportsTags($cache)) {
-            return $cache->tags($cacheTags)->remember($cacheKey, $minutes * 60, $callback);
-        }
-
-        return $cache->remember($cacheKey, $minutes * 60, $callback);
+        return $this->aggregateFromCache('sum', $column);
     }
 
     /**
@@ -463,24 +374,7 @@ class CacheableBuilder extends Builder
      */
     public function maxFromCache($column)
     {
-        $cacheKey = $this->getCacheKey([
-            'max',
-            $column,
-        ]);
-
-        $minutes = $this->cacheMinutes ?: config('model-cache.cache_duration', 60);
-        $cacheTags = $this->getCacheTags();
-        $cache = $this->getCacheDriver();
-
-        $callback = function () use ($column) {
-            return parent::max($column);
-        };
-
-        if ($cacheTags && $this->supportsTags($cache)) {
-            return $cache->tags($cacheTags)->remember($cacheKey, $minutes * 60, $callback);
-        }
-
-        return $cache->remember($cacheKey, $minutes * 60, $callback);
+        return $this->aggregateFromCache('max', $column);
     }
 
     /**
@@ -491,24 +385,7 @@ class CacheableBuilder extends Builder
      */
     public function minFromCache($column)
     {
-        $cacheKey = $this->getCacheKey([
-            'min',
-            $column,
-        ]);
-
-        $minutes = $this->cacheMinutes ?: config('model-cache.cache_duration', 60);
-        $cacheTags = $this->getCacheTags();
-        $cache = $this->getCacheDriver();
-
-        $callback = function () use ($column) {
-            return parent::min($column);
-        };
-
-        if ($cacheTags && $this->supportsTags($cache)) {
-            return $cache->tags($cacheTags)->remember($cacheKey, $minutes * 60, $callback);
-        }
-
-        return $cache->remember($cacheKey, $minutes * 60, $callback);
+        return $this->aggregateFromCache('min', $column);
     }
 
     /**
@@ -519,24 +396,7 @@ class CacheableBuilder extends Builder
      */
     public function avgFromCache($column)
     {
-        $cacheKey = $this->getCacheKey([
-            'avg',
-            $column,
-        ]);
-
-        $minutes = $this->cacheMinutes ?: config('model-cache.cache_duration', 60);
-        $cacheTags = $this->getCacheTags();
-        $cache = $this->getCacheDriver();
-
-        $callback = function () use ($column) {
-            return parent::avg($column);
-        };
-
-        if ($cacheTags && $this->supportsTags($cache)) {
-            return $cache->tags($cacheTags)->remember($cacheKey, $minutes * 60, $callback);
-        }
-
-        return $cache->remember($cacheKey, $minutes * 60, $callback);
+        return $this->aggregateFromCache('avg', $column);
     }
 
     /**
@@ -642,7 +502,9 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `update` operation for model: ' . get_class($this->model));
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info('Flushing cache after `update` operation for model: ' . get_class($this->model));
+            }
             $this->flushModelOrQueryCache();
         }
 
@@ -661,7 +523,9 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model if any records were deleted
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `delete` operation for model: ' . get_class($this->model));
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info('Flushing cache after `delete` operation for model: ' . get_class($this->model));
+            }
             $this->flushModelOrQueryCache();
         }
 
@@ -682,7 +546,9 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `increment` operation for model: ' . get_class($this->model));
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info('Flushing cache after `increment` operation for model: ' . get_class($this->model));
+            }
             $this->flushModelOrQueryCache();
         }
 
@@ -703,7 +569,9 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `decrement` operation for model: ' . get_class($this->model));
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info('Flushing cache after `decrement` operation for model: ' . get_class($this->model));
+            }
             $this->flushModelOrQueryCache();
         }
 
@@ -722,7 +590,9 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model if insert was successful
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `insert` operation for model: ' . get_class($this->model));
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info('Flushing cache after `insert` operation for model: ' . get_class($this->model));
+            }
             $this->flushModelOrQueryCache();
         }
 
@@ -741,7 +611,9 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model if any records were inserted
         if ($result > 0) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `insertOrIgnore` operation for model: ' . get_class($this->model));
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info('Flushing cache after `insertOrIgnore` operation for model: ' . get_class($this->model));
+            }
             $this->flushModelOrQueryCache();
         }
 
@@ -761,7 +633,9 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `insertGetId` operation for model: ' . get_class($this->model));
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info('Flushing cache after `insertGetId` operation for model: ' . get_class($this->model));
+            }
             $this->flushModelOrQueryCache();
         }
 
@@ -781,7 +655,9 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model if operation was successful
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `updateOrInsert` operation for model: ' . get_class($this->model));
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info('Flushing cache after `updateOrInsert` operation for model: ' . get_class($this->model));
+            }
             $this->flushModelOrQueryCache();
         }
 
@@ -807,7 +683,9 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model if any records were affected
         if ($result > 0) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `upsert` operation for model: ' . get_class($this->model));
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info('Flushing cache after `upsert` operation for model: ' . get_class($this->model));
+            }
             $this->flushModelOrQueryCache();
         }
 
@@ -825,7 +703,9 @@ class CacheableBuilder extends Builder
         parent::truncate();
 
         // Always flush the cache after truncate
-        resolve(ModelCacheDebugger::class)->info('Flushing cache after `truncate` operation for model: ' . get_class($this->model));
+        if (config('model-cache.debug_mode', false)) {
+            resolve(ModelCacheDebugger::class)->info('Flushing cache after `truncate` operation for model: ' . get_class($this->model));
+        }
         $this->flushModelOrQueryCache();
     }
 
@@ -847,7 +727,9 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `forceDelete` operation for model: ' . get_class($this->model));
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info('Flushing cache after `forceDelete` operation for model: ' . get_class($this->model));
+            }
             $this->flushModelOrQueryCache();
         }
 
@@ -872,7 +754,9 @@ class CacheableBuilder extends Builder
 
         // Flush the cache for this model
         if ($result) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `restore` operation for model: ' . get_class($this->model));
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info('Flushing cache after `restore` operation for model: ' . get_class($this->model));
+            }
             $this->flushModelOrQueryCache();
         }
 
@@ -950,18 +834,24 @@ class CacheableBuilder extends Builder
      */
     protected function getCacheDriver()
     {
+        if ($this->cacheDriver !== null) {
+            return $this->cacheDriver;
+        }
+
         try {
             $cacheStore = config('model-cache.cache_store');
 
             if ($cacheStore) {
-                return Cache::store($cacheStore);
+                $this->cacheDriver = Cache::store($cacheStore);
+            } else {
+                $this->cacheDriver = Cache::store();
             }
-
-            return Cache::store();
         } catch (\Exception $e) {
             // If there's an issue with the configured cache driver,
             // fall back to the default driver
-            return Cache::store(config('cache.default'));
+            $this->cacheDriver = Cache::store(config('cache.default'));
         }
+
+        return $this->cacheDriver;
     }
 }

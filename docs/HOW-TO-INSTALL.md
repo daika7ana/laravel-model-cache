@@ -49,19 +49,24 @@ CACHE_STORE=database
 
 ### File / Array
 
-`file` and `array` work with fallback behavior, but invalidation may flush broader cache scopes.
+`file` and `array` drivers do not support tags. Without tags, cache invalidation is skipped to avoid flushing unrelated application cache (sessions, auth, etc.). Use Redis or Memcached for full invalidation support.
 
 ## 4) Optional package settings
 
 In `config/model-cache.php` you can tune:
 
-- `enabled`
-- `cache_duration`
-- `cache_key_prefix`
-- `cache_store`
+- `enabled` — globally enable/disable query caching (default: `true`)
+- `cache_duration` — default TTL in minutes (default: `60`)
+- `cache_key_prefix` — prefix for all cache keys (default: `model_cache_`)
+- `cache_store` — cache store to use, `null` uses the app default
+- `hash_algorithm` — algorithm for cache key hashing (default: `xxh128`)
+- `include_locale_in_key` — include app locale in cache key for multilingual sites (default: `false`)
+- `debug_mode` — log cache key generation and flush operations (default: `false`)
 
 Example:
 
 ```php
-'cache_store' => env('MODEL_CACHE_STORE', 'redis'),
+'cache_store' => env('MODEL_CACHE_STORE', null),
+'include_locale_in_key' => env('MODEL_CACHE_INCLUDE_LOCALE', false),
+'debug_mode' => env('MODEL_CACHE_DEBUG', false),
 ```

@@ -10,6 +10,9 @@ class User extends Authenticatable
 {
     use HasCachedQueries, Notifiable;
 
+    // Alternatively, if you also need relationship cache invalidation:
+    // use \YMigVal\LaravelModelCache\HasCacheableModel, Notifiable;
+
     /**
      * The attributes that are mass assignable.
      *

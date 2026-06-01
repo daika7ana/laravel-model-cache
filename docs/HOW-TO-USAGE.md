@@ -47,15 +47,24 @@ $freshPosts = Post::withoutCache()->get();
 
 ## 6) Use relationship cache invalidation helpers (belongsToMany)
 
-Add both traits:
+Add both traits (or use the convenience trait):
 
 ```php
+// Option A: individual traits
 use YMigVal\LaravelModelCache\HasCachedQueries;
 use YMigVal\LaravelModelCache\HasCachedRelationships;
 
 class Post extends Model
 {
     use HasCachedQueries, HasCachedRelationships;
+}
+
+// Option B: convenience trait (includes both)
+use YMigVal\LaravelModelCache\HasCacheableModel;
+
+class Post extends Model
+{
+    use HasCacheableModel;
 }
 ```
 

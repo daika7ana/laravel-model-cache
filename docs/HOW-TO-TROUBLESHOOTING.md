@@ -14,7 +14,7 @@ Check these first:
 Common causes:
 
 1. Data changed through direct query builder operations that bypass model lifecycle events.
-2. Cache driver does not fully support tags.
+2. Cache driver does not support tags (file, array, database). Without tags, invalidation is skipped to avoid flushing unrelated application cache. Use Redis or Memcached.
 3. Relationship changes are made without `HasCachedRelationships` where needed.
 
 ## Relationship changes not reflected

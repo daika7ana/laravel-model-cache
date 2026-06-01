@@ -30,7 +30,7 @@ return [
     | Defaults to xxh128 for speed when available.
     |
     */
-    'hash_algorithm' => env('MODEL_CACHE_HASH_ALGORITHM', 'xxh128'),
+    'hash_algorithm' => (string) env('MODEL_CACHE_HASH_ALGORITHM', 'xxh128'),
 
     /*
     |--------------------------------------------------------------------------
@@ -44,7 +44,7 @@ return [
     | Note: For tag support, use Redis or Memcached drivers.
     |
     */
-    'cache_store' => env('MODEL_CACHE_STORE', null),
+    'cache_store' => (string) env('MODEL_CACHE_STORE', null),
 
     /*
     |--------------------------------------------------------------------------
@@ -54,7 +54,19 @@ return [
     | This option provides an easy way to globally enable/disable query caching.
     |
     */
-    'enabled' => env('MODEL_CACHE_ENABLED', true),
+    'enabled' => (bool) env('MODEL_CACHE_ENABLED', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Include Locale in Cache Key
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the application locale will be included in the cache key.
+    | This is useful for multilingual sites where query results may differ
+    | by locale. Enable this only if you need per-locale caching.
+    |
+    */
+    'include_locale_in_key' => (bool) env('MODEL_CACHE_INCLUDE_LOCALE', false),
 
     /*
     |--------------------------------------------------------------------------
@@ -65,5 +77,5 @@ return [
     | queries being cached. Useful for troubleshooting cache-related issues.
     |
     */
-    'debug_mode' => env('MODEL_CACHE_DEBUG', false),
+    'debug_mode' => (bool) env('MODEL_CACHE_DEBUG', false),
 ];

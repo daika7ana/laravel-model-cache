@@ -51,10 +51,6 @@ trait HasCachedQueries
 
         foreach (['created', 'updated', 'deleted', 'restored'] as $event) {
             static::registerModelEvent($event, function (Model $model) use ($event, $debugger) {
-                if ($model->newModelQuery() instanceof CacheableBuilder) {
-                    return;
-                }
-
                 static::flushModelCache();
 
                 $debugger->info("Cache flushed after `{$event}` for model: " . get_class($model));
@@ -70,13 +66,14 @@ trait HasCachedQueries
      */
     public static function flushModelCache()
     {
+        $debugger = resolve(ModelCacheDebugger::class);
+
         try {
             $modelClass = static::class;
             $tableName = (new static)->getTable();
 
             // Get the cache driver directly
             $cache = self::getStaticCacheDriver();
-            $debugger = resolve(ModelCacheDebugger::class);
 
             // Set tags for this model
             $tags = [
@@ -94,15 +91,14 @@ trait HasCachedQueries
                     return $result;
                 } catch (\Exception $e) {
                     $debugger->error("Error flushing cache with tags for model {$modelClass}: {$e->getMessage()}");
-                    // Continue to fallback method if tags fail
                 }
             }
 
-            // Fallback to flush the entire cache
-            $result = $cache->flush();
-            $debugger->info("Entire cache flushed for model: {$modelClass}");
+            // Without tags, we cannot safely flush only this model's cache.
+            // Flushing the entire cache would destroy sessions, auth tokens, etc.
+            $debugger->warning("Cache driver does not support tags. Model cache invalidation requires Redis or Memcached. Skipping flush for model: {$modelClass}");
 
-            return $result;
+            return false;
 
         } catch (\Exception $e) {
             $debugger->error('Error in flushCacheStatic for model ' . static::class . ": {$e->getMessage()}");

@@ -49,6 +49,8 @@ class Post extends Model
 }
 ```
 
+> **Tip:** If your model also needs relationship cache invalidation, you can use the convenience trait `HasCacheableModel` instead, which includes both `HasCachedQueries` and `HasCachedRelationships`.
+
 ### 3) Query as usual
 
 ```php

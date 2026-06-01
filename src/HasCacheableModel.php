@@ -2,7 +2,7 @@
 
 namespace YMigVal\LaravelModelCache;
 
-trait HasCachableModel
+trait HasCacheableModel
 {
     use HasCachedQueries;
     use HasCachedRelationships;

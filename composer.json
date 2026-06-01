@@ -41,6 +41,10 @@
         "phpunit/phpunit": "^9.0|^10.0|^11.0|^12.0|^13.0",
         "laravel/pint": "^1.27"
     },
+    "suggest": {
+        "ext-redis": "Required for tag-based cache invalidation with Redis",
+        "ext-memcached": "Required for tag-based cache invalidation with Memcached"
+    },
     "autoload": {
         "psr-4": {
             "YMigVal\\LaravelModelCache\\": "src/"

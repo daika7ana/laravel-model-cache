@@ -142,9 +142,17 @@ trait HasCachedRelationships
             return parent::guessBelongsToManyRelation();
         }
 
-        [$one, $two, $caller] = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3);
+        $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 4);
 
-        return $caller['function'];
+        // Walk up the stack to find the calling method (skip this method and belongsToMany)
+        foreach ($trace as $frame) {
+            if (isset($frame['function']) && $frame['function'] !== 'guessBelongsToManyRelation' && $frame['function'] !== 'belongsToMany') {
+                return $frame['function'];
+            }
+        }
+
+        // Fallback: return the caller's function name
+        return $trace[2]['function'] ?? 'unknown';
     }
 
     /**

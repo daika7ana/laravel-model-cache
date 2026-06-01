@@ -5,20 +5,6 @@ namespace YMigVal\LaravelModelCache;
 final class ModelCacheDebugger
 {
     /**
-     * Cached debug mode lookup.
-     *
-     * @var bool|null
-     */
-    private $debugModeEnabled = null;
-
-    /**
-     * Cached logger function availability lookup.
-     *
-     * @var bool|null
-     */
-    private $loggerFunctionAvailable = null;
-
-    /**
      * Log a debug-level message when enabled.
      */
     public function debug(string $message): void
@@ -59,14 +45,6 @@ final class ModelCacheDebugger
      */
     private function shouldLogDebugMessages(): bool
     {
-        if ($this->debugModeEnabled === null) {
-            $this->debugModeEnabled = (bool) config('model-cache.debug_mode', false);
-        }
-
-        if ($this->loggerFunctionAvailable === null) {
-            $this->loggerFunctionAvailable = function_exists('logger');
-        }
-
-        return $this->debugModeEnabled && $this->loggerFunctionAvailable;
+        return (bool) config('model-cache.debug_mode', false) && function_exists('logger');
     }
 }
