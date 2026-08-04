@@ -2,11 +2,17 @@
 
 namespace YMigVal\LaravelModelCache\Tests\Feature;
 
+use Illuminate\Console\OutputStyle;
 use Illuminate\Support\Facades\Cache;
+use Mockery;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Output\BufferedOutput;
+use YMigVal\LaravelModelCache\Console\Commands\ClearModelCacheCommand;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithoutCache;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Tag;
+use YMigVal\LaravelModelCache\Tests\Fixtures\Models\ThrowingFlushModel;
 use YMigVal\LaravelModelCache\Tests\TestCase;
 
 class ConsoleCommandTest extends TestCase
@@ -95,5 +101,34 @@ class ConsoleCommandTest extends TestCase
         ])
             ->expectsOutputToContain("Current cache driver: {$cacheDriver}")
             ->assertExitCode(0);
+    }
+
+    #[Test]
+    public function it_defaults_full_cache_flush_confirmation_to_no()
+    {
+        // A model whose flush throws forces the command into its error path,
+        // where it asks whether to wipe the entire application cache.
+        $output = Mockery::mock(OutputStyle::class . '[askQuestion]', [
+            new ArrayInput([]),
+            new BufferedOutput(),
+        ]);
+
+        $output->shouldReceive('askQuestion')
+            ->once()
+            ->with(Mockery::on(function ($question) {
+                $this->assertFalse($question->getDefault(), 'Full cache flush confirm must default to No');
+
+                return true;
+            }))
+            ->andReturn(false);
+
+        $command = $this->app->make(ClearModelCacheCommand::class);
+        $command->setLaravel($this->app);
+
+        $command->run(new ArrayInput([
+            'model' => ThrowingFlushModel::class,
+        ]), $output);
+
+        Mockery::close();
     }
 }
