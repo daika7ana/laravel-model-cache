@@ -4,6 +4,7 @@ namespace YMigVal\LaravelModelCache;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Support\Facades\DB;
 
 class CachingBelongsToMany extends BelongsToMany
 {
@@ -161,15 +162,24 @@ class CachingBelongsToMany extends BelongsToMany
      */
     protected function flushCache($operation)
     {
-        if (method_exists($this->cacheableParent, 'flushModelCache')) {
-            $this->cacheableParent->flushModelCache();
-        } elseif (method_exists($this->cacheableParent, 'flushCache')) {
-            $this->cacheableParent->flushCache();
-        } else {
-            throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
-        }
+        $flush = function () use ($operation) {
+            if (method_exists($this->cacheableParent, 'flushModelCache')) {
+                $this->cacheableParent->flushModelCache();
+            } elseif (method_exists($this->cacheableParent, 'flushCache')) {
+                $this->cacheableParent->flushCache();
+            } else {
+                throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
+            }
 
-        resolve(ModelCacheDebugger::class)->info("Cache flushed after {$operation} operation for model: " . get_class($this->cacheableParent));
+            resolve(ModelCacheDebugger::class)->info("Cache flushed after {$operation} operation for model: " . get_class($this->cacheableParent));
+        };
+
+        // Defer flush until the transaction commits to avoid flushing on rollback
+        if (DB::transactionLevel() > 0) {
+            DB::afterCommit($flush);
+        } else {
+            $flush();
+        }
     }
 
     /**

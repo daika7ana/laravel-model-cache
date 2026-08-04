@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithoutCache;
+use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
+use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Tag;
 use YMigVal\LaravelModelCache\Tests\TestCase;
 
 /**
@@ -579,6 +581,58 @@ class CacheInvalidationTest extends TestCase
 
         $this->assertCount(1, $posts);
         $this->assertEquals('Committed', $posts->first()->title);
+        $this->assertGreaterThan(0, $queryCount, 'Cache must be flushed after the transaction commits');
+    }
+
+    // ========== Transaction-aware relationship invalidation ==========
+
+    #[Test]
+    public function it_skips_relationship_flush_when_transaction_rolls_back()
+    {
+        $post = PostWithRelationships::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        $tag = Tag::create(['name' => 'Tag']);
+
+        // Cache the query with eager-loaded tags (0 tags)
+        PostWithRelationships::with('tags')->where('published', true)->get();
+
+        // Attach inside a transaction, then roll back
+        DB::beginTransaction();
+        $post->tags()->attach($tag->id);
+        DB::rollBack();
+
+        // The flush was deferred and discarded on rollback — cache must still be valid
+        DB::enableQueryLog();
+        $posts = PostWithRelationships::with('tags')->where('published', true)->get();
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertCount(1, $posts);
+        $this->assertCount(0, $posts->first()->tags, 'Rolled-back attachment must not be visible');
+        $this->assertEquals(0, $queryCount, 'Cache must not be flushed when the transaction rolls back');
+    }
+
+    #[Test]
+    public function it_flushes_relationship_cache_after_transaction_commit()
+    {
+        $post = PostWithRelationships::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        $tag = Tag::create(['name' => 'Tag']);
+
+        // Cache the query with eager-loaded tags (0 tags)
+        PostWithRelationships::with('tags')->where('published', true)->get();
+
+        // Attach inside a transaction, then commit
+        DB::beginTransaction();
+        $post->tags()->attach($tag->id);
+        DB::commit();
+
+        // Deferred flush must run after commit — next read hits the DB with fresh data
+        DB::enableQueryLog();
+        $posts = PostWithRelationships::with('tags')->where('published', true)->get();
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertCount(1, $posts);
+        $this->assertCount(1, $posts->first()->tags, 'Committed attachment must be visible');
         $this->assertGreaterThan(0, $queryCount, 'Cache must be flushed after the transaction commits');
     }
 }
