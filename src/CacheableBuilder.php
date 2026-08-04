@@ -909,6 +909,13 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
         $flush = function () {
             if (method_exists($this->model, 'flushModelCache')) {
                 $this->model->flushModelCache();
+
+                // Instance operations (delete/forceDelete) run through this builder first
+                // and then fire the `deleted` event; mark the instance so the event handler
+                // skips its redundant flush.
+                if (method_exists($this->model, 'markCacheFlushed')) {
+                    $this->model->markCacheFlushed($this->model);
+                }
             } else {
                 $this->flushQueryCache();
             }
