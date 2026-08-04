@@ -331,6 +331,26 @@ class FunctionalCoverageTest extends TestCase
     }
 
     #[Test]
+    public function it_returns_the_touch_result_from_builder_touch()
+    {
+        $post = Post::create(['title' => 'Post 1', 'content' => 'Content', 'published' => true]);
+
+        // Builder touch() must return the number of affected rows like the parent
+        $result = Post::query()->where('id', $post->id)->touch();
+
+        $this->assertEquals(1, $result, 'Builder touch should return the number of affected rows');
+    }
+
+    #[Test]
+    public function it_returns_zero_from_builder_touch_when_no_rows_match()
+    {
+        // No matching row — parent returns 0
+        $result = Post::query()->where('id', 999999)->touch();
+
+        $this->assertEquals(0, $result, 'Builder touch should return 0 when no rows are affected');
+    }
+
+    #[Test]
     public function it_invalidates_cache_on_builder_restore()
     {
         $post = Post::create(['title' => 'Post 1', 'content' => 'Content', 'published' => true]);
