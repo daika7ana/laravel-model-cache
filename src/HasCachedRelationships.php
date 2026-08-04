@@ -2,6 +2,8 @@
 
 namespace YMigVal\LaravelModelCache;
 
+use Illuminate\Support\Facades\DB;
+
 /**
  * Helper trait to flush cache when relationship methods are called.
  *
@@ -166,14 +168,23 @@ trait HasCachedRelationships
      */
     protected function flushRelationshipCache(string $operation): void
     {
-        if (method_exists($this, 'flushModelCache')) {
-            $this->flushModelCache();
-        } elseif (method_exists($this, 'flushCache')) {
-            $this->flushCache();
-        } else {
-            throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
-        }
+        $flush = function () use ($operation) {
+            if (method_exists($this, 'flushModelCache')) {
+                $this->flushModelCache();
+            } elseif (method_exists($this, 'flushCache')) {
+                $this->flushCache();
+            } else {
+                throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
+            }
 
-        resolve(ModelCacheDebugger::class)->info("Cache flushed after {$operation} operation for model: " . get_class($this));
+            resolve(ModelCacheDebugger::class)->info("Cache flushed after {$operation} operation for model: " . get_class($this));
+        };
+
+        // Defer flush until the transaction commits to avoid flushing on rollback
+        if (DB::transactionLevel() > 0) {
+            DB::afterCommit($flush);
+        } else {
+            $flush();
+        }
     }
 }
