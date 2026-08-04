@@ -5,6 +5,7 @@ namespace YMigVal\LaravelModelCache\Tests\Unit;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
+use YMigVal\LaravelModelCache\ModelCacheDebugger;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithoutCache;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
@@ -634,5 +635,107 @@ class CacheInvalidationTest extends TestCase
         $this->assertCount(1, $posts);
         $this->assertCount(1, $posts->first()->tags, 'Committed attachment must be visible');
         $this->assertGreaterThan(0, $queryCount, 'Cache must be flushed after the transaction commits');
+    }
+
+    #[Test]
+    public function it_flushes_cache_exactly_once_on_instance_create()
+    {
+        $spy = $this->installDebuggerSpy();
+
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+
+        $this->assertEquals(1, $spy->staticallyFlushed, 'Instance create must flush the cache exactly once');
+    }
+
+    #[Test]
+    public function it_flushes_cache_exactly_once_on_instance_update()
+    {
+        $spy = $this->installDebuggerSpy();
+
+        $post = Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+
+        $spy->staticallyFlushed = 0; // Reset after setup
+
+        $post->update(['title' => 'Updated']);
+
+        $this->assertEquals(1, $spy->staticallyFlushed, 'Instance update must flush the cache exactly once');
+    }
+
+    #[Test]
+    public function it_flushes_cache_exactly_once_on_instance_delete()
+    {
+        $spy = $this->installDebuggerSpy();
+
+        $post = Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        Post::where('published', true)->get(); // Cache
+
+        $spy->staticallyFlushed = 0; // Reset after setup
+
+        $post->delete();
+
+        $this->assertEquals(1, $spy->staticallyFlushed, 'Instance delete must flush the cache exactly once');
+    }
+
+    #[Test]
+    public function it_flushes_cache_exactly_once_on_instance_restore()
+    {
+        $spy = $this->installDebuggerSpy();
+
+        $post = Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        $post->delete();
+
+        $spy->staticallyFlushed = 0; // Reset after setup
+
+        $post->restore();
+
+        $this->assertEquals(1, $spy->staticallyFlushed, 'Instance restore must flush the cache exactly once');
+    }
+
+    #[Test]
+    public function it_flushes_cache_exactly_once_on_instance_force_delete()
+    {
+        $spy = $this->installDebuggerSpy();
+
+        $post = Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        $post->delete();
+
+        $spy->staticallyFlushed = 0; // Reset after setup
+
+        $post->forceDelete();
+
+        $this->assertEquals(1, $spy->staticallyFlushed, 'Instance forceDelete must flush the cache exactly once');
+    }
+
+    // ========== Single flush on instance operations ==========
+
+    /**
+     * Replace the debugger with a spy that counts flushModelCache() executions.
+     *
+     * flushModelCache() logs "Cache flushed statically for model: ..." on every
+     * execution, so counting those messages gives the exact flush count.
+     */
+    private function installDebuggerSpy(): object
+    {
+        $spy = new class {
+            public int $staticallyFlushed = 0;
+
+            public function info(string $message): void
+            {
+                if (str_contains($message, 'statically')) {
+                    $this->staticallyFlushed++;
+                }
+            }
+
+            public function debug(string $message): void {}
+
+            public function warning(string $message): void {}
+
+            public function error(string $message): void {}
+        };
+
+        $this->app->instance(ModelCacheDebugger::class, $spy);
+        config()->set('model-cache.debug_mode', true);
+
+        return $spy;
     }
 }
