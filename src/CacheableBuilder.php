@@ -52,7 +52,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      * Touch all of the related models for the relationship.
      *
      * @param  null  $column
-     * @return void
+     * @return int|false
      */
     public function touch($column = null)
     {
@@ -61,6 +61,8 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
         if ($result > 0) {
             $this->flushModelOrQueryCache();
         }
+
+        return $result;
     }
 
     /**
