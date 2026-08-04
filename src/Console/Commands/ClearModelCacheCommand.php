@@ -121,8 +121,9 @@ class ClearModelCacheCommand extends Command
             $this->components->error("Error clearing cache for {$modelClass}: " . $e->getMessage());
             $this->components->error('Stack trace: ' . $e->getTraceAsString());
 
-            // Ask if user wants to try full cache flush as a last resort
-            if ($this->components->confirm('Would you like to clear the entire application cache?', true)) {
+            // Ask if user wants to try full cache flush as a last resort.
+            // Default to No: pressing Enter must not wipe the entire application cache.
+            if ($this->components->confirm('Would you like to clear the entire application cache?', false)) {
                 $this->performFullCacheFlush();
             }
         }
