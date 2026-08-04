@@ -140,30 +140,6 @@ trait HasCachedRelationships
     }
 
     /**
-     * Get the relationship name from the backtrace.
-     *
-     * @return string
-     */
-    protected function guessBelongsToManyRelation()
-    {
-        if (method_exists(parent::class, 'guessBelongsToManyRelation')) {
-            return parent::guessBelongsToManyRelation();
-        }
-
-        $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 4);
-
-        // Walk up the stack to find the calling method (skip this method and belongsToMany)
-        foreach ($trace as $frame) {
-            if (isset($frame['function']) && $frame['function'] !== 'guessBelongsToManyRelation' && $frame['function'] !== 'belongsToMany') {
-                return $frame['function'];
-            }
-        }
-
-        // Fallback: return the caller's function name
-        return $trace[2]['function'] ?? 'unknown';
-    }
-
-    /**
      * Flush relationship cache and emit debug log.
      */
     protected function flushRelationshipCache(string $operation): void
