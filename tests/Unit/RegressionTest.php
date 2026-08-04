@@ -13,7 +13,6 @@ use YMigVal\LaravelModelCache\HasCachedRelationships;
 use YMigVal\LaravelModelCache\ModelCacheDebugger;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Tag;
 use YMigVal\LaravelModelCache\Tests\TestCase;
 
 /**
