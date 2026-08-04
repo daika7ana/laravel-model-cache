@@ -67,34 +67,25 @@ class HasCachedQueriesTest extends TestCase
     #[Test]
     public function it_uses_custom_cache_duration()
     {
-        // This test verifies that custom cache duration is applied
-        $post = PostWithCustomCache::create([
-            'title' => 'Test Post',
-            'content' => 'Test Content',
-            'published' => true,
-        ]);
+        // The model declares $cacheMinutes = 120 — the builder must pick it up
+        $builder = PostWithCustomCache::query()->where('published', true);
 
-        // Query with custom cache settings
-        $posts = PostWithCustomCache::where('published', true)->get();
-        $this->assertCount(1, $posts);
+        $property = (new \ReflectionClass($builder))->getProperty('cacheMinutes');
+        $property->setAccessible(true);
 
-        // The model has custom cache duration set to 120
-        // We can't directly access protected property, but we can verify the model type
-        $this->assertInstanceOf(PostWithCustomCache::class, $post);
+        $this->assertSame(120, $property->getValue($builder), 'Model cacheMinutes must be applied to the builder');
     }
 
     #[Test]
     public function it_uses_custom_cache_prefix()
     {
-        $post = PostWithCustomCache::create([
-            'title' => 'Test Post',
-            'content' => 'Test Content',
-            'published' => true,
-        ]);
+        // The model declares $cachePrefix = 'custom_post_' — the builder must pick it up
+        $builder = PostWithCustomCache::query()->where('published', true);
 
-        // The model has custom cache prefix set to 'custom_post_'
-        // We can't directly access protected property, but we can verify the model type
-        $this->assertInstanceOf(PostWithCustomCache::class, $post);
+        $property = (new \ReflectionClass($builder))->getProperty('cachePrefix');
+        $property->setAccessible(true);
+
+        $this->assertSame('custom_post_', $property->getValue($builder), 'Model cachePrefix must be applied to the builder');
     }
 
     #[Test]

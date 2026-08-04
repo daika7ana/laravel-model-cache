@@ -9,6 +9,7 @@ use YMigVal\LaravelModelCache\ModelCacheDebugger;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Tag;
+use YMigVal\LaravelModelCache\Tests\Fixtures\RecorderLogger;
 use YMigVal\LaravelModelCache\Tests\TestCase;
 
 /**
@@ -87,18 +88,42 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
     #[Test]
     public function it_has_correct_default_config_values()
     {
-        // Reset to defaults
-        config()->set('model-cache.cache_duration', 60);
-        config()->set('model-cache.cache_key_prefix', 'model_cache_');
-        config()->set('model-cache.enabled', true);
-        config()->set('model-cache.debug_mode', false);
-        config()->set('model-cache.include_locale_in_key', false);
+        // Assert the published config file's defaults, so accidental changes to
+        // the package defaults are caught (not just echo back what we just set)
+        $defaults = require __DIR__ . '/../../config/model-cache.php';
 
-        $this->assertEquals(60, config('model-cache.cache_duration'));
-        $this->assertEquals('model_cache_', config('model-cache.cache_key_prefix'));
-        $this->assertTrue(config('model-cache.enabled'));
-        $this->assertFalse(config('model-cache.debug_mode'));
-        $this->assertFalse(config('model-cache.include_locale_in_key'));
+        $this->assertSame(60, $defaults['cache_duration']);
+        $this->assertSame('model_cache_', $defaults['cache_key_prefix']);
+        $this->assertSame('xxh128', $defaults['hash_algorithm']);
+        $this->assertSame('', $defaults['cache_store']);
+        $this->assertTrue($defaults['enabled']);
+        $this->assertFalse($defaults['include_locale_in_key']);
+        $this->assertFalse($defaults['debug_mode']);
+        $this->assertFalse($defaults['use_cache_locks']);
+        $this->assertSame(5, $defaults['cache_lock_seconds']);
+    }
+
+    #[Test]
+    public function it_skips_flush_and_returns_false_when_store_does_not_support_tags()
+    {
+        // The database store does not implement TaggableStore — flushModelCache()
+        // must skip the flush (never wipe the whole cache) and return false.
+        $logger = new RecorderLogger();
+        $this->app->instance('log', $logger);
+
+        config()->set('cache.default', 'database');
+        $this->ensureDatabaseCacheTables();
+
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        Post::where('published', true)->get();
+
+        $result = Post::flushModelCache();
+
+        $this->assertFalse($result, 'flushModelCache must return false when the store does not support tags');
+
+        $warnings = array_filter($logger->records, fn($record) => $record[0] === 'warning');
+        $this->assertNotEmpty($warnings, 'A warning must explain that the flush was skipped');
+        $this->assertStringContainsString('does not support tags', $warnings[0][1]);
     }
 
     // ========== Relationship cache edge cases ==========
@@ -120,8 +145,8 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
         DB::enableQueryLog();
         $posts = PostWithRelationships::where('published', true)->get();
         $this->assertCount(1, $posts);
-        // Note: With array driver (no tags), cache might not be invalidated anyway
-        // This test verifies the attach() call doesn't error on empty input
+        // Note: array supports tags since Laravel 11; this test only verifies
+        // that attach() with an empty array doesn't error and doesn't flush.
     }
 
     #[Test]
@@ -286,7 +311,8 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
 
         $this->assertCount(2, $posts, 'Post cache should be invalidated');
         $this->assertGreaterThan(0, $postQueries);
-        // Tag cache behavior depends on driver (array doesn't support tags)
+        // The stores used here support tags (memcached/array on Laravel 11+);
+        // only the Post tag was flushed, so Tag cache stays valid.
         $this->assertCount(1, $tags);
     }
 

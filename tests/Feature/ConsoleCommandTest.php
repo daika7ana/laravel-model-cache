@@ -70,12 +70,23 @@ class ConsoleCommandTest extends TestCase
     #[Test]
     public function it_shows_error_for_non_existent_model()
     {
-        // Run the command with non-existent model
+        // Run the command with non-existent model — must signal failure to automation
         $this->artisan('mcache:flush', [
             'model' => 'App\\Models\\NonExistentModel',
         ])
             ->expectsOutputToContain('Model class App\\Models\\NonExistentModel does not exist!')
-            ->assertExitCode(0);
+            ->assertExitCode(1);
+    }
+
+    #[Test]
+    public function it_returns_failure_for_non_model_class()
+    {
+        // Run the command with a class that is not an Eloquent model
+        $this->artisan('mcache:flush', [
+            'model' => \stdClass::class,
+        ])
+            ->expectsOutputToContain('Class ' . \stdClass::class . ' is not an Eloquent model.')
+            ->assertExitCode(1);
     }
 
     #[Test]

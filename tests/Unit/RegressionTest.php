@@ -13,6 +13,7 @@ use YMigVal\LaravelModelCache\HasCachedRelationships;
 use YMigVal\LaravelModelCache\ModelCacheDebugger;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
+use YMigVal\LaravelModelCache\Tests\Fixtures\RecorderLogger;
 use YMigVal\LaravelModelCache\Tests\TestCase;
 
 /**
@@ -252,32 +253,30 @@ class RegressionTest extends TestCase
         $this->assertEquals(0, $secondQueries, 'Second min should be served from cache');
     }
 
-    // ========== 5. Debug mode gating ==========
-
     #[Test]
-    public function it_does_not_resolve_debugger_when_debug_mode_disabled()
+    public function it_does_not_log_when_debug_mode_disabled()
     {
         config()->set('model-cache.debug_mode', false);
+        $logger = $this->installLogRecorder();
 
-        // Create data and run queries — should not throw even without debug
+        // Create data and run queries — no debug output may be written
         Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
         Post::where('published', true)->get();
         Post::where('published', true)->count();
 
-        // If we got here without errors, debug gating works
-        $this->assertTrue(true);
+        $this->assertSame([], $logger->records, 'No log output may be written when debug mode is disabled');
     }
 
     #[Test]
-    public function it_resolves_debugger_when_debug_mode_enabled()
+    public function it_logs_when_debug_mode_enabled()
     {
         config()->set('model-cache.debug_mode', true);
+        $logger = $this->installLogRecorder();
 
         Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
         Post::where('published', true)->get();
 
-        // Should not throw — debugger is resolved and logs
-        $this->assertTrue(true);
+        $this->assertNotEmpty($logger->records, 'Debug mode must produce log output');
     }
 
     // ========== 6. Debugger config not cached ==========
@@ -286,17 +285,17 @@ class RegressionTest extends TestCase
     public function it_reads_debug_config_on_every_call()
     {
         $debugger = resolve(ModelCacheDebugger::class);
+        $logger = $this->installLogRecorder();
 
-        // Disable debug
+        // Disable debug — info() must not log
         config()->set('model-cache.debug_mode', false);
-        // Should not log (no way to assert directly, but shouldn't throw)
-
-        // Enable debug
-        config()->set('model-cache.debug_mode', true);
-        // Should log (same instance, config re-read)
         $debugger->info('test message');
+        $this->assertSame([], $logger->records, 'info() must not log while debug mode is off');
 
-        $this->assertTrue(true, 'Debugger should read config on every call');
+        // Enable debug — the same instance must log now (config re-read per call)
+        config()->set('model-cache.debug_mode', true);
+        $debugger->info('test message');
+        $this->assertNotEmpty($logger->records, 'info() must log once debug mode is enabled');
     }
 
     // ========== 9. Locale in cache key ==========
@@ -426,5 +425,20 @@ class RegressionTest extends TestCase
         $builder = Post::query();
         $this->assertInstanceOf(\Illuminate\Database\Eloquent\Builder::class, $builder);
         $this->assertInstanceOf(CacheableBuilder::class, $builder);
+    }
+
+    // ========== 5. Debug mode gating ==========
+
+    /**
+     * Swap the application logger for a recorder so we can assert what the
+     * package actually writes, instead of just "it didn't throw".
+     */
+    private function installLogRecorder(): RecorderLogger
+    {
+        $logger = new RecorderLogger();
+
+        $this->app->instance('log', $logger);
+
+        return $logger;
     }
 }
