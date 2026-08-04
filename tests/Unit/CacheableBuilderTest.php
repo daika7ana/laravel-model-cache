@@ -3,6 +3,7 @@
 namespace YMigVal\LaravelModelCache\Tests\Unit;
 
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
 use YMigVal\LaravelModelCache\Tests\TestCase;
@@ -50,9 +51,12 @@ class CacheableBuilderTest extends TestCase
         $posts = Post::where('published', true)->remember(30)->get();
         $this->assertCount(1, $posts);
 
-        // Query again - should be cached
+        // Query again - should be served from the cache (0 database queries)
+        DB::enableQueryLog();
         $posts = Post::where('published', true)->remember(30)->get();
         $this->assertCount(1, $posts);
+        $this->assertEquals(0, count(DB::getQueryLog()), 'Second remember() query should be served from cache');
+        DB::disableQueryLog();
     }
 
     #[Test]
@@ -69,9 +73,12 @@ class CacheableBuilderTest extends TestCase
         $posts = Post::where('published', true)->getFromCache();
         $this->assertCount(1, $posts);
 
-        // Query again - should be cached
+        // Query again - should be served from the cache (0 database queries)
+        DB::enableQueryLog();
         $posts = Post::where('published', true)->getFromCache();
         $this->assertCount(1, $posts);
+        $this->assertEquals(0, count(DB::getQueryLog()), 'Second getFromCache() query should be served from cache');
+        DB::disableQueryLog();
     }
 
     #[Test]
@@ -89,9 +96,12 @@ class CacheableBuilderTest extends TestCase
         $this->assertNotNull($post);
         $this->assertEquals('Test Post', $post->title);
 
-        // Query again - should be cached
+        // Query again - should be served from the cache (0 database queries)
+        DB::enableQueryLog();
         $post = Post::where('published', true)->firstFromCache();
         $this->assertNotNull($post);
+        $this->assertEquals(0, count(DB::getQueryLog()), 'Second firstFromCache() query should be served from cache');
+        DB::disableQueryLog();
     }
 
     // ========== Section 2: Cache Key Generation ==========
@@ -113,6 +123,10 @@ class CacheableBuilderTest extends TestCase
         ]);
 
         // Different queries should use different cache keys
+        $keyPublished = Post::where('published', true)->getCacheKey();
+        $keyUnpublished = Post::where('published', false)->getCacheKey();
+        $this->assertNotEquals($keyPublished, $keyUnpublished, 'Different queries must produce different cache keys');
+
         $publishedPosts = Post::where('published', true)->get();
         $unpublishedPosts = Post::where('published', false)->get();
 

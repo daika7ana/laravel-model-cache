@@ -33,10 +33,10 @@ class ClearModelCacheCommand extends Command
         $modelClass = $this->argument('model');
 
         if ($modelClass) {
-            $this->clearModelCache($modelClass);
-        } else {
-            $this->clearAllModelCache();
+            return $this->clearModelCache($modelClass) ? CommandAlias::SUCCESS : CommandAlias::FAILURE;
         }
+
+        $this->clearAllModelCache();
 
         return CommandAlias::SUCCESS;
     }
@@ -44,18 +44,18 @@ class ClearModelCacheCommand extends Command
     /**
      * Clear cache for a specific model.
      */
-    protected function clearModelCache(string $modelClass): void
+    protected function clearModelCache(string $modelClass): bool
     {
         if (! class_exists($modelClass)) {
             $this->components->error("Model class {$modelClass} does not exist!");
 
-            return;
+            return false;
         }
 
         if (! is_a($modelClass, Model::class, true)) {
             $this->components->error("Class {$modelClass} is not an Eloquent model.");
 
-            return;
+            return false;
         }
 
         $this->components->info("Attempting to clear cache for model: {$modelClass}");
@@ -84,7 +84,7 @@ class ClearModelCacheCommand extends Command
                     $this->performFullCacheFlush();
                 }
 
-                return;
+                return true;
             }
 
             $this->components->info('No static methods found. Trying with instance methods...');
@@ -127,6 +127,8 @@ class ClearModelCacheCommand extends Command
                 $this->performFullCacheFlush();
             }
         }
+
+        return true;
     }
 
     /**
