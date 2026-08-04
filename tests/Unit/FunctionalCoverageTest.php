@@ -143,6 +143,96 @@ class FunctionalCoverageTest extends TestCase
         $this->assertNotEquals($page1->first()->id, $page2->first()->id, 'Different pages should have different data');
     }
 
+    #[Test]
+    public function it_bypasses_cache_with_without_cache_on_paginate_from_cache()
+    {
+        for ($i = 1; $i <= 20; $i++) {
+            Post::create(['title' => "Post $i", 'content' => "Content $i", 'published' => true]);
+        }
+
+        DB::enableQueryLog();
+        $page1 = Post::where('published', true)->withoutCache()->paginateFromCache(10);
+        $firstQueries = count(DB::getQueryLog());
+        DB::flushQueryLog();
+
+        DB::enableQueryLog();
+        $page2 = Post::where('published', true)->withoutCache()->paginateFromCache(10);
+        $secondQueries = count(DB::getQueryLog());
+
+        $this->assertCount(10, $page1);
+        $this->assertCount(10, $page2);
+        $this->assertGreaterThan(0, $firstQueries);
+        $this->assertGreaterThan(0, $secondQueries, 'withoutCache() paginate should always hit the database');
+    }
+
+    #[Test]
+    public function it_auto_caches_plain_paginate()
+    {
+        for ($i = 1; $i <= 20; $i++) {
+            Post::create(['title' => "Post $i", 'content' => "Content $i", 'published' => true]);
+        }
+
+        DB::enableQueryLog();
+        $page1 = Post::where('published', true)->paginate(10);
+        $firstQueries = count(DB::getQueryLog());
+        DB::flushQueryLog();
+
+        DB::enableQueryLog();
+        $page2 = Post::where('published', true)->paginate(10);
+        $secondQueries = count(DB::getQueryLog());
+
+        $this->assertCount(10, $page1);
+        $this->assertCount(10, $page2);
+        $this->assertEquals($page1->first()->id, $page2->first()->id);
+        $this->assertGreaterThan(0, $firstQueries);
+        $this->assertEquals(0, $secondQueries, 'Second paginate should be served from cache');
+    }
+
+    #[Test]
+    public function it_bypasses_cache_with_without_cache_on_plain_paginate()
+    {
+        for ($i = 1; $i <= 20; $i++) {
+            Post::create(['title' => "Post $i", 'content' => "Content $i", 'published' => true]);
+        }
+
+        DB::enableQueryLog();
+        $page1 = Post::where('published', true)->withoutCache()->paginate(10);
+        $firstQueries = count(DB::getQueryLog());
+        DB::flushQueryLog();
+
+        DB::enableQueryLog();
+        $page2 = Post::where('published', true)->withoutCache()->paginate(10);
+        $secondQueries = count(DB::getQueryLog());
+
+        $this->assertCount(10, $page1);
+        $this->assertCount(10, $page2);
+        $this->assertGreaterThan(0, $firstQueries);
+        $this->assertGreaterThan(0, $secondQueries, 'withoutCache() paginate should always hit the database');
+    }
+
+    #[Test]
+    public function it_accepts_custom_total_on_paginate_from_cache()
+    {
+        for ($i = 1; $i <= 20; $i++) {
+            Post::create(['title' => "Post $i", 'content' => "Content $i", 'published' => true]);
+        }
+
+        DB::enableQueryLog();
+        $page1 = Post::where('published', true)->paginateFromCache(10, ['*'], 'page', 1, 999);
+        $firstQueries = count(DB::getQueryLog());
+        DB::flushQueryLog();
+
+        $this->assertCount(10, $page1);
+        $this->assertEquals(999, $page1->total(), 'Custom total should be respected');
+
+        DB::enableQueryLog();
+        $page2 = Post::where('published', true)->paginateFromCache(10, ['*'], 'page', 1, 999);
+        $secondQueries = count(DB::getQueryLog());
+
+        $this->assertEquals(999, $page2->total());
+        $this->assertEquals(0, $secondQueries, 'Custom-total paginate should be served from cache');
+    }
+
     // ========== Builder operations ==========
 
     #[Test]
