@@ -136,7 +136,8 @@ class CacheableBuilderTest extends TestCase
     {
         config()->set('model-cache.hash_algorithm', 'not-a-real-hash');
 
-        $this->expectException(\ValueError::class);
+        // Same exception type as the provider's boot-time validation (ModelCacheServiceProvider)
+        $this->expectException(\InvalidArgumentException::class);
 
         Post::query()->where('published', true)->getCacheKey();
     }

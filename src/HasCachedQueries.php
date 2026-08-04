@@ -6,6 +6,7 @@ use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
+use YMigVal\LaravelModelCache\Contracts\CacheableBuilderContract;
 
 /**
  * @property ?int $cacheMinutes
@@ -188,14 +189,9 @@ trait HasCachedQueries
      *
      * @return bool
      */
-    public function scopeFlushCache($query)
+    public function scopeFlushCache(CacheableBuilderContract $query)
     {
-        if (method_exists($query, 'flushQueryCache')) {
-            return $query->flushQueryCache();
-        }
-
-        // Fallback to flushing the entire model cache
-        return $this->flushCache();
+        return $query->flushQueryCache();
     }
 
     /**

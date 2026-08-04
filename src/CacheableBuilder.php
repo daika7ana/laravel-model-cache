@@ -203,18 +203,18 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function flushQueryCache($columns = ['*']): bool
     {
-        $debugger = resolve(ModelCacheDebugger::class);
-
         try {
             $cacheKey = $this->getCacheKey($columns);
             $cache = $this->getCacheDriver();
 
-            $debugger->info("Flushing specific query cache: {$cacheKey}");
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info("Flushing specific query cache: {$cacheKey}");
+            }
 
             // Try to forget this specific key
             $result = $cache->forget($cacheKey);
-            if ($result) {
-                $debugger->debug("Successfully removed specific cache key: {$cacheKey}");
+            if ($result && config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->debug("Successfully removed specific cache key: {$cacheKey}");
             }
 
             // Try with tags if supported
@@ -223,15 +223,19 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
                 try {
                     $cache->tags($cacheTags)->flush();
                     $result = true;
-                    $debugger->debug('Successfully flushed cache using tags for model: ' . get_class($this->model));
+                    if (config('model-cache.debug_mode', false)) {
+                        resolve(ModelCacheDebugger::class)->debug('Successfully flushed cache using tags for model: ' . get_class($this->model));
+                    }
                 } catch (\Exception $e) {
-                    $debugger->debug("Could not flush by tags: {$e->getMessage()}");
+                    if (config('model-cache.debug_mode', false)) {
+                        resolve(ModelCacheDebugger::class)->debug("Could not flush by tags: {$e->getMessage()}");
+                    }
                 }
             }
 
             return $result;
         } catch (\Exception $e) {
-            $debugger->error("Error flushing query cache: {$e->getMessage()}");
+            resolve(ModelCacheDebugger::class)->error("Error flushing query cache: {$e->getMessage()}");
 
             return false;
         }
@@ -324,7 +328,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             $perPage,
             $pageName,
             $page,
-            serialize($columns),
+            json_encode($columns),
         ];
 
         // A custom total produces a different paginator, so it must produce a different key
@@ -658,10 +662,11 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
     /**
      * Insert or update a record matching the attributes, and fill it with values.
      *
-     * @param  array  $values
+     * @param  array  $attributes
+     * @param  array|callable  $values
      * @return bool
      */
-    public function updateOrInsert(array $attributes, $values = [])
+    public function updateOrInsert(array $attributes, array|callable $values = [])
     {
         // Execute the updateOrInsert operation
         $result = parent::updateOrInsert($attributes, $values);
@@ -686,11 +691,6 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function upsert(array $values, $uniqueBy, $update = null)
     {
-        // Check if upsert method exists in the parent (Laravel 8+)
-        if (! method_exists(get_parent_class($this), 'upsert')) {
-            throw new \BadMethodCallException('Method upsert() is not supported by the database driver.');
-        }
-
         // Execute the upsert operation
         $result = parent::upsert($values, $uniqueBy, $update);
 
@@ -939,7 +939,15 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
     {
         $algorithm = strtolower((string) config('model-cache.hash_algorithm', 'xxh128'));
 
-        return hash($algorithm, $value);
+        try {
+            return hash($algorithm, $value);
+        } catch (\ValueError $e) {
+            // Keep the exception type consistent with the provider's boot-time validation
+            throw new \InvalidArgumentException(
+                "Invalid model-cache.hash_algorithm '{$algorithm}'. Available algorithms: " . implode(', ', array_slice(hash_algos(), 0, 10)) . '...',
+                previous: $e,
+            );
+        }
     }
 
     /**
