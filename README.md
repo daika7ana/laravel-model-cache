@@ -9,22 +9,20 @@ Cache Eloquent queries with minimal code changes and automatic invalidation.
 > This repository is a fork of the original project by Yordan:
 > https://github.com/ymigval/laravel-model-cache
 
-## What this package does
+## Features
 
-- Replaces Eloquent's default builder with a cache-aware builder.
-- Caches regular query results (`get()`, `first()`, etc.) automatically.
-- Supports explicit cache methods (`getFromCache()`, `firstFromCache()`) when you want more explicit code.
-- Flushes cache on create/update/delete/restore model events.
-- Supports relationship-aware invalidation via `HasCachedRelationships`.
-- **Fail-open** — if the cache driver is unavailable, queries fall through to the database instead of crashing.
-- **Transaction-aware** — cache invalidation is deferred until the transaction commits, avoiding unnecessary flushes on rollback.
-- **Stampede prevention** — optional cache locking prevents multiple concurrent requests from hitting the database simultaneously on cache miss.
-- **Per-model configuration** — configure cache duration, prefix, and lock duration per model.
+- **Automatic caching** of `get()`, `first()`, `count()`, other aggregates, and `paginate()` via a drop-in builder.
+- **Tag-based invalidation** on create/update/delete/restore and all mass operations.
+- **Transaction-aware** — flushes are deferred until commit, never on rollback.
+- **Fail-open** — cache errors fall through to the database instead of crashing.
+- **Stampede prevention** — optional cache locking for concurrent cache misses.
+- **Per-model configuration** — cache duration, key prefix, and lock duration per model.
 
 ## Requirements
 
 - PHP `^8.2`
 - Laravel `11.x` through `13.x`
+- Redis or Memcached for tag-based invalidation (recommended)
 
 ## Quick Start
 
@@ -34,7 +32,7 @@ Cache Eloquent queries with minimal code changes and automatic invalidation.
 composer require ymigval/laravel-model-cache
 ```
 
-### 2) Add `HasCachedQueries` to a model
+### 2) Add the trait to a model
 
 ```php
 <?php
@@ -48,49 +46,45 @@ class Post extends Model
 {
     use HasCachedQueries;
 
-    protected $cacheMinutes = 120;
-    protected $cachePrefix = 'posts_';
-    protected $cacheLockSeconds = 15; // optional: override stampede lock duration
+    protected $cacheMinutes = 120;     // optional: TTL in minutes (default: config)
+    protected $cachePrefix = 'posts_'; // optional: key prefix (default: config)
+    protected $cacheLockSeconds = 15;  // optional: stampede lock duration (default: config)
 }
 ```
 
-> **Tip:** If your model also needs relationship cache invalidation, you can use the convenience trait `HasCacheableModel` instead, which includes both `HasCachedQueries` and `HasCachedRelationships`.
+> **Tip:** Use `HasCacheableModel` instead to also invalidate the cache on `belongsToMany` attach/detach/sync.
 
 ### 3) Query as usual
 
 ```php
-$posts = Post::where('published', true)->get();
-$post = Post::whereKey(1)->first();
-
-$featured = Post::where('featured', true)->remember(30)->get();
+$posts = Post::where('published', true)->get();                 // cached automatically
+$featured = Post::where('featured', true)->remember(30)->get(); // per-query TTL
+$fresh = Post::where('featured', true)->withoutCache()->get();  // bypass cache
 ```
 
-### Optional explicit query methods
+Explicit variants (`getFromCache()`, `firstFromCache()`, `paginateFromCache()`) are also available.
 
-```php
-$posts = Post::where('published', true)->getFromCache();
-$post = Post::whereKey(1)->firstFromCache();
-```
-
-## Common Command
+## Clearing the cache
 
 ```bash
-php artisan mcache:flush
-php artisan mcache:flush "App\\Models\\Post"
+php artisan mcache:flush                     # all cached models
+php artisan mcache:flush "App\\Models\\Post" # one model
 ```
 
 ## Documentation
 
-Detailed HOW TO guides are in [docs/README.md](docs/README.md):
+How-to guides — start at [docs/README.md](docs/README.md):
 
 - [How to install and configure](docs/HOW-TO-INSTALL.md)
 - [How to use in models and queries](docs/HOW-TO-USAGE.md)
+- [Examples](docs/EXAMPLES.md)
+- [API reference](docs/API-REFERENCE.md)
 - [How to clear cache](docs/HOW-TO-CACHE-FLUSHING.md)
 - [How to troubleshoot common issues](docs/HOW-TO-TROUBLESHOOTING.md)
 
 ## Contributing
 
-Please see [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

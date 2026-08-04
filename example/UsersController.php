@@ -8,61 +8,41 @@ use Illuminate\Http\Request;
 class UsersController extends Controller
 {
     /**
-     * Display a listing of the active users.
-     *
-     * @return \Illuminate\Http\Response
+     * Cached scope query (30 minutes).
      */
     public function index()
     {
-        // This will use the cached query results
-        $users = User::active()->getFromCache();
-
-        return view('users.index', compact('users'));
+        return view('users.index', ['users' => User::active()->getFromCache()]);
     }
 
     /**
-     * Display a listing of all users with custom cache duration.
-     *
-     * @return \Illuminate\Http\Response
+     * Query with a custom TTL (2 hours).
      */
     public function all()
     {
-        // Cache the results for 2 hours
-        $users = User::remember(120)->getFromCache();
-
-        return view('users.all', compact('users'));
+        return view('users.all', ['users' => User::remember(120)->getFromCache()]);
     }
 
     /**
-     * Find a specific user by email, using cache.
-     *
-     * @return \Illuminate\Http\Response
+     * First result, cached.
      */
     public function findByEmail(Request $request)
     {
-        $email = $request->input('email');
-
-        // This will use the cached query result or store it if not exists
-        $user = User::where('email', $email)->remember()->firstFromCache();
+        $user = User::where('email', $request->input('email'))->firstFromCache();
 
         if (! $user) {
             return redirect()->back()->with('error', 'User not found.');
         }
 
-        return view('users.show', compact('user'));
+        return view('users.show', ['user' => $user]);
     }
 
     /**
-     * Update a user, which will automatically invalidate cache.
-     *
-     * @return \Illuminate\Http\Response
+     * Updating a user flushes the cache automatically.
      */
     public function update(Request $request, User $user)
     {
-        $user->update($request->validated());
-
-        // No need to manually invalidate cache - the HasCachedQueries trait
-        // handles this automatically when the model is updated
+        $user->update($request->only('name', 'email'));
 
         return redirect()->route('users.show', $user)->with('success', 'User updated.');
     }

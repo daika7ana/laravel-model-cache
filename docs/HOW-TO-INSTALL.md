@@ -1,4 +1,4 @@
-# How To Install and Configure
+# How to Install and Configure
 
 ## 1) Install the package
 
@@ -6,7 +6,7 @@
 composer require ymigval/laravel-model-cache
 ```
 
-## 2) (Optional) Publish config
+## 2) (Optional) Publish the config
 
 ```bash
 php artisan vendor:publish --provider="YMigVal\LaravelModelCache\ModelCacheServiceProvider" --tag="config"
@@ -14,65 +14,34 @@ php artisan vendor:publish --provider="YMigVal\LaravelModelCache\ModelCacheServi
 
 This creates `config/model-cache.php`.
 
-## 3) Configure a cache driver
+## 3) Choose a cache driver
 
-Tag-aware drivers are recommended for best selective invalidation.
-
-### Redis (recommended)
+Tag-based invalidation requires a **tag-capable** driver: Redis or Memcached. With drivers that don't support tags (file, database), writes log a warning and **skip the flush** instead of wiping unrelated application cache (sessions, auth, ...).
 
 ```env
+# Redis
 CACHE_STORE=redis
 REDIS_CLIENT=phpredis
-REDIS_HOST=127.0.0.1
-REDIS_PASSWORD=null
-REDIS_PORT=6379
-```
 
-### Memcached
-
-```env
+# or Memcached
 CACHE_STORE=memcached
 MEMCACHED_HOST=127.0.0.1
-MEMCACHED_PORT=11211
 ```
 
-### Database
+> Reads are cached with any driver — only selective invalidation needs tags.
 
-```bash
-php artisan cache:table
-php artisan migrate
-```
+## 4) Configuration reference
 
-```env
-CACHE_STORE=database
-```
+| Key | Env var | Default | Purpose |
+|-----|---------|---------|---------|
+| `enabled` | `MODEL_CACHE_ENABLED` | `true` | Global on/off switch |
+| `cache_duration` | — | `60` | Default TTL in minutes |
+| `cache_key_prefix` | — | `model_cache_` | Cache key prefix |
+| `cache_store` | `MODEL_CACHE_STORE` | app default | Store used for model cache |
+| `hash_algorithm` | `MODEL_CACHE_HASH_ALGORITHM` | `xxh128` | Key hashing algorithm (validated at boot) |
+| `include_locale_in_key` | `MODEL_CACHE_INCLUDE_LOCALE` | `false` | Add the app locale to cache keys |
+| `debug_mode` | `MODEL_CACHE_DEBUG` | `false` | Log key generation and flush operations |
+| `use_cache_locks` | `MODEL_CACHE_USE_LOCKS` | `false` | Stampede prevention |
+| `cache_lock_seconds` | `MODEL_CACHE_LOCK_SECONDS` | `5` | Stampede lock duration (seconds) |
 
-### File / Array
-
-`file` and `array` drivers do not support tags. Without tags, cache invalidation is skipped to avoid flushing unrelated application cache (sessions, auth, etc.). Use Redis or Memcached for full invalidation support.
-
-## 4) Optional package settings
-
-In `config/model-cache.php` you can tune:
-
-- `enabled` — globally enable/disable query caching (default: `true`)
-- `cache_duration` — default TTL in minutes (default: `60`)
-- `cache_key_prefix` — prefix for all cache keys (default: `model_cache_`)
-- `cache_store` — cache store to use, `null` uses the app default
-- `hash_algorithm` — algorithm for cache key hashing (default: `xxh128`)
-- `include_locale_in_key` — include app locale in cache key for multilingual sites (default: `false`)
-- `debug_mode` — log cache key generation and flush operations (default: `false`)
-- `use_cache_locks` — enable stampede prevention locking (default: `false`)
-- `cache_lock_seconds` — lock duration in seconds for stampede prevention (default: `10`)
-
-> **Note:** Errors and warnings are always logged regardless of `debug_mode`. Only `debug` and `info` level messages are gated behind the debug flag.
-
-Example:
-
-```php
-'cache_store' => env('MODEL_CACHE_STORE', null),
-'include_locale_in_key' => env('MODEL_CACHE_INCLUDE_LOCALE', false),
-'debug_mode' => env('MODEL_CACHE_DEBUG', false),
-'use_cache_locks' => env('MODEL_CACHE_USE_LOCKS', false),
-'cache_lock_seconds' => (int) env('MODEL_CACHE_LOCK_SECONDS', 10),
-```
+> Errors and warnings are always logged; only `debug`/`info` messages are gated behind `debug_mode`.

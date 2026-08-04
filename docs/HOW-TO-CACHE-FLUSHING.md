@@ -1,34 +1,23 @@
-# How To Clear Cache
+# How to Clear Cache
 
-## Clear one model cache
-
-```bash
-php artisan mcache:flush "App\Models\User"
-```
-
-## Clear all model cache
+## Via artisan
 
 ```bash
-php artisan mcache:flush
+php artisan mcache:flush                    # all cached models
+php artisan mcache:flush "App\Models\Post"  # one model
 ```
 
-## Clear cache in code
+## In code
 
 ```php
-// Clear by model class
-User::flushModelCache();
-
-// Clear from model instance
-$user = User::find(1);
-$user?->flushCache();
+Post::flushModelCache(); // by model class
+$post->flushCache();     // from a model instance
 ```
 
-## When to clear manually
+## When manual flushing is needed
 
-- After large data imports that bypass Eloquent events
-- After deployments with schema/query changes
-- During debugging of stale reads
+Cache is invalidated automatically on model events and mass operations. Flush manually after changes that bypass Eloquent entirely: bulk imports, raw `DB` writes, or schema/query changes in deployments.
 
-## Transaction-aware invalidation
+## Transactions
 
-Cache invalidation is automatically deferred when inside `DB::transaction()`. The cache is only flushed after the transaction commits successfully. If the transaction rolls back, the cache remains valid — no manual intervention needed.
+Inside a transaction, flushes are deferred until the commit — a rollback leaves the cache untouched.

@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    name: PHP ${{ matrix.php }} — ${{ matrix.driver }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: [8.3, 8.4]
+        driver: [memcached, array]
+    services:
+      memcached:
+        image: memcached:1.6
+        ports:
+          - 11211:11211
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: memcached, pdo_sqlite, sqlite3
+          coverage: none
+
+      # No composer.lock is committed, so resolve fresh on each run.
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Check style
+        run: composer check-style
+
+      # phpunit.xml defaults to memcached; the step-level env override wins
+      # (PHPUnit only sets env vars that are not already defined).
+      - name: Run tests
+        env:
+          CACHE_DRIVER: ${{ matrix.driver }}
+        run: composer test

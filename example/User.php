@@ -11,8 +11,8 @@ class User extends Authenticatable
     use HasCachedQueries;
     use Notifiable;
 
-    // Alternatively, if you also need relationship cache invalidation:
-    // use \YMigVal\LaravelModelCache\HasCacheableModel, Notifiable;
+    // Alternatively, to also invalidate cache on belongsToMany
+    // attach/detach/sync: use \YMigVal\LaravelModelCache\HasCacheableModel, Notifiable;
 
     /**
      * Cache duration in minutes (optional, defaults to config value).
@@ -57,14 +57,13 @@ class User extends Authenticatable
     ];
 
     /**
-     * Example of using the cached queries in a scope.
+     * Scope that caches its results for 30 minutes.
      *
      * @param  \Illuminate\Database\Eloquent\Builder  $query
      * @return \Illuminate\Database\Eloquent\Builder
      */
     public function scopeActive($query)
     {
-        // The query results will be cached for 30 minutes
         return $query->where('active', true)->remember(30);
     }
 }
