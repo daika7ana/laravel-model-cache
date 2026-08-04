@@ -289,4 +289,53 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
         // Tag cache behavior depends on driver (array doesn't support tags)
         $this->assertCount(1, $tags);
     }
+
+    // ========== Stampede prevention (cache locks) ==========
+
+    #[Test]
+    public function it_executes_query_when_stampede_lock_is_held()
+    {
+        config()->set('model-cache.use_cache_locks', true);
+        // Keep the polling loop short so the fallback path runs fast in tests.
+        config()->set('model-cache.cache_lock_seconds', 1);
+
+        Post::create(['title' => 'Locked', 'content' => 'Content', 'published' => true]);
+
+        $builder = Post::where('published', true);
+        $lock = Cache::store()->lock('stampede:' . $builder->getCacheKey(), 30);
+        $lock->get();
+
+        try {
+            // Another request holds the stampede lock and is still computing —
+            // we must not return null (which used to throw a TypeError);
+            // the query should be executed directly instead.
+            $posts = $builder->getFromCache();
+            $this->assertCount(1, $posts);
+            $this->assertEquals('Locked', $posts->first()->title);
+        } finally {
+            $lock->forceRelease();
+        }
+    }
+
+    #[Test]
+    public function it_caches_queries_with_stampede_locks_enabled()
+    {
+        config()->set('model-cache.use_cache_locks', true);
+
+        Post::create(['title' => 'Locked', 'content' => 'Content', 'published' => true]);
+
+        DB::enableQueryLog();
+        $posts = Post::where('published', true)->getFromCache();
+        $firstQueries = count(DB::getQueryLog());
+        DB::flushQueryLog();
+
+        DB::enableQueryLog();
+        Post::where('published', true)->getFromCache();
+        $secondQueries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertCount(1, $posts);
+        $this->assertGreaterThan(0, $firstQueries, 'First read should hit the database');
+        $this->assertEquals(0, $secondQueries, 'Second read should be served from cache');
+    }
 }

@@ -751,7 +751,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
 
         $cache = $this->getCacheDriver();
         $lockKey = "stampede:{$cacheKey}";
-        $lockDuration = $this->cacheLockSeconds ?? config('model-cache.cache_lock_seconds', 10);
+        $lockDuration = $this->cacheLockSeconds ?? config('model-cache.cache_lock_seconds', 5);
 
         // Try to get existing cached value first
         try {
@@ -787,19 +787,30 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             }
         }
 
-        // Another request is computing — wait briefly and re-read
-        usleep(100000); // 100ms
+        // Another request is computing — poll for the result until the lock
+        // duration elapses, then fall back to executing the query directly.
+        $deadline = microtime(true) + $lockDuration;
 
-        try {
-            if ($cacheTags && $this->supportsTags($cache)) {
-                return $cache->tags($cacheTags)->get($cacheKey);
+        while (microtime(true) < $deadline) {
+            usleep(50000); // 50ms
+
+            try {
+                $cached = $cacheTags && $this->supportsTags($cache)
+                    ? $cache->tags($cacheTags)->get($cacheKey)
+                    : $cache->get($cacheKey);
+            } catch (\Exception $e) {
+                // If the re-read fails, just execute the query directly
+                return $callback();
             }
 
-            return $cache->get($cacheKey);
-        } catch (\Exception $e) {
-            // If re-read fails, just execute the query directly
-            return $callback();
+            if ($cached !== null) {
+                return $cached;
+            }
         }
+
+        // The lock holder is still computing past the lock duration — execute
+        // the query directly instead of returning null to a caller expecting a Collection.
+        return $callback();
     }
 
     /**
