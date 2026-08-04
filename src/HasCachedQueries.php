@@ -59,7 +59,7 @@ trait HasCachedQueries
                 };
 
                 // Defer flush until transaction commits to avoid flushing on rollback
-                if (function_exists('DB') && DB::transactionLevel() > 0) {
+                if (DB::transactionLevel() > 0) {
                     DB::afterCommit($flush);
                 } else {
                     $flush();

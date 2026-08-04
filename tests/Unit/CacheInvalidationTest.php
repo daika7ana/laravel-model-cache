@@ -533,4 +533,52 @@ class CacheInvalidationTest extends TestCase
         $this->assertEquals(70, $updatedPost->views, 'CRITICAL: Should return FRESH data after cache invalidation');
         $this->assertGreaterThan(0, $freshQueryCount, 'Query after decrement should hit database (cache invalidated)');
     }
+
+    // ========== Transaction-aware invalidation ==========
+
+    #[Test]
+    public function it_skips_flush_when_transaction_rolls_back()
+    {
+        $post = Post::create(['title' => 'Original', 'content' => 'Content', 'published' => true]);
+
+        // Cache the query result
+        Post::where('published', true)->get();
+
+        // Update inside a transaction, then roll back
+        DB::beginTransaction();
+        $post->update(['title' => 'Changed']);
+        DB::rollBack();
+
+        // The flush was deferred and discarded on rollback — cache must still be valid
+        DB::enableQueryLog();
+        $posts = Post::where('published', true)->get();
+        $queryCount = count(DB::getQueryLog());
+
+        $this->assertCount(1, $posts);
+        $this->assertEquals('Original', $posts->first()->title);
+        $this->assertEquals(0, $queryCount, 'Cache must not be flushed when the transaction rolls back');
+    }
+
+    #[Test]
+    public function it_flushes_after_transaction_commit()
+    {
+        $post = Post::create(['title' => 'Original', 'content' => 'Content', 'published' => true]);
+
+        // Cache the query result
+        Post::where('published', true)->get();
+
+        // Update inside a transaction, then commit
+        DB::beginTransaction();
+        $post->update(['title' => 'Committed']);
+        DB::commit();
+
+        // Deferred flush must run after commit — next read hits the DB with fresh data
+        DB::enableQueryLog();
+        $posts = Post::where('published', true)->get();
+        $queryCount = count(DB::getQueryLog());
+
+        $this->assertCount(1, $posts);
+        $this->assertEquals('Committed', $posts->first()->title);
+        $this->assertGreaterThan(0, $queryCount, 'Cache must be flushed after the transaction commits');
+    }
 }
