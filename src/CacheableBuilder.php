@@ -274,32 +274,70 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      * @param  array  $columns
      * @param  string  $pageName
      * @param  int|null  $page
+     * @param  int|null  $total
      * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator
      */
-    public function paginateFromCache($perPage = null, $columns = ['*'], $pageName = 'page', $page = null)
+    public function paginate($perPage = null, $columns = ['*'], $pageName = 'page', $page = null, $total = null)
+    {
+        // Fast path: caching disabled globally
+        if (config('model-cache.enabled', true) === false) {
+            return parent::paginate($perPage, $columns, $pageName, $page, $total);
+        }
+
+        // Fast path: explicitly disabled for this query
+        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
+            return parent::paginate($perPage, $columns, $pageName, $page, $total);
+        }
+
+        return $this->paginateFromCache($perPage, $columns, $pageName, $page, $total);
+    }
+
+    /**
+     * Paginate the given query with caching support.
+     *
+     * @param  int|null  $perPage
+     * @param  array  $columns
+     * @param  string  $pageName
+     * @param  int|null  $page
+     * @param  int|null  $total
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator
+     */
+    public function paginateFromCache($perPage = null, $columns = ['*'], $pageName = 'page', $page = null, $total = null)
     {
         if (config('model-cache.enabled', true) === false) {
-            return parent::paginate($perPage, $columns, $pageName, $page);
+            return parent::paginate($perPage, $columns, $pageName, $page, $total);
+        }
+
+        // Fast path: explicitly disabled for this query
+        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
+            return parent::paginate($perPage, $columns, $pageName, $page, $total);
         }
 
         $page = $page ?: \Illuminate\Pagination\Paginator::resolveCurrentPage($pageName);
 
         $perPage = $perPage ?: $this->model->getPerPage();
 
-        $cacheKey = $this->getCacheKey([
+        $keyComponents = [
             'paginate',
             $perPage,
             $pageName,
             $page,
             serialize($columns),
-        ]);
+        ];
+
+        // A custom total produces a different paginator, so it must produce a different key
+        if ($total !== null) {
+            $keyComponents[] = $total;
+        }
+
+        $cacheKey = $this->getCacheKey($keyComponents);
 
         $minutes = $this->cacheMinutes ?: config('model-cache.cache_duration', 60);
         $cacheTags = $this->getCacheTags();
         $cache = $this->getCacheDriver();
 
-        $callback = function () use ($perPage, $columns, $pageName, $page) {
-            return parent::paginate($perPage, $columns, $pageName, $page);
+        $callback = function () use ($perPage, $columns, $pageName, $page, $total) {
+            return parent::paginate($perPage, $columns, $pageName, $page, $total);
         };
 
         try {
