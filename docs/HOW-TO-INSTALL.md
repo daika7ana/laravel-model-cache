@@ -3,13 +3,13 @@
 ## 1) Install the package
 
 ```bash
-composer require ymigval/laravel-model-cache
+composer require daika7ana/laravel-model-cache
 ```
 
 ## 2) (Optional) Publish the config
 
 ```bash
-php artisan vendor:publish --provider="YMigVal\LaravelModelCache\ModelCacheServiceProvider" --tag="config"
+php artisan vendor:publish --provider="Daika7ana\LaravelModelCache\ModelCacheServiceProvider" --tag="config"
 ```
 
 This creates `config/model-cache.php`.
@@ -40,7 +40,7 @@ MEMCACHED_HOST=127.0.0.1
 | `cache_store` | `MODEL_CACHE_STORE` | app default | Store used for model cache |
 | `hash_algorithm` | `MODEL_CACHE_HASH_ALGORITHM` | `xxh128` | Key hashing algorithm (validated at boot) |
 | `include_locale_in_key` | `MODEL_CACHE_INCLUDE_LOCALE` | `false` | Add the app locale to cache keys |
-| `debug_mode` | `MODEL_CACHE_DEBUG` | `false` | Log key generation and flush operations |
+| `debug_mode` | `MODEL_CACHE_DEBUG` | `false` | Log key generation, cache hits/misses, and flush operations |
 | `use_cache_locks` | `MODEL_CACHE_USE_LOCKS` | `false` | Stampede prevention |
 | `cache_lock_seconds` | `MODEL_CACHE_LOCK_SECONDS` | `5` | Stampede lock duration (seconds) |
 

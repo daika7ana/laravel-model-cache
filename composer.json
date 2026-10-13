@@ -1,5 +1,5 @@
 {
-    "name": "ymigval/laravel-model-cache",
+    "name": "daika7ana/laravel-model-cache",
     "description": "Laravel package for caching Eloquent model queries",
     "homepage": "https://github.com/daika7ana/laravel-model-cache",
     "keywords": [
@@ -22,6 +22,9 @@
     "type": "library",
     "license": "MIT",
     "authors": [
+        {
+            "name": "daika7ana"
+        },
         {
             "name": "Yordan",
             "email": "banatube@gmail.com"
@@ -47,12 +50,12 @@
     },
     "autoload": {
         "psr-4": {
-            "YMigVal\\LaravelModelCache\\": "src/"
+            "Daika7ana\\LaravelModelCache\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "YMigVal\\LaravelModelCache\\Tests\\": "tests/"
+            "Daika7ana\\LaravelModelCache\\Tests\\": "tests/"
         }
     },
     "scripts": {
@@ -63,7 +66,7 @@
     "extra": {
         "laravel": {
             "providers": [
-                "YMigVal\\LaravelModelCache\\ModelCacheServiceProvider"
+                "Daika7ana\\LaravelModelCache\\ModelCacheServiceProvider"
             ]
         }
     }

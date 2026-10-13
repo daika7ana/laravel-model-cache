@@ -1,6 +1,6 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests\Fixtures\Models;
+namespace Daika7ana\LaravelModelCache\Tests\Fixtures\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use YMigVal\LaravelModelCache\HasCacheableModel;
+use Daika7ana\LaravelModelCache\HasCacheableModel;
 
 class PostWithRelationships extends Model
 {

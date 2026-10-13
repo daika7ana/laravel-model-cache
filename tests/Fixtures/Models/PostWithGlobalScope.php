@@ -1,6 +1,6 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests\Fixtures\Models;
+namespace Daika7ana\LaravelModelCache\Tests\Fixtures\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 

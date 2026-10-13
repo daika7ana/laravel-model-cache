@@ -1,11 +1,11 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests\Fixtures\Models;
+namespace Daika7ana\LaravelModelCache\Tests\Fixtures\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
-use YMigVal\LaravelModelCache\HasCachedQueries;
+use Daika7ana\LaravelModelCache\HasCachedQueries;
 
 class Comment extends Model
 {

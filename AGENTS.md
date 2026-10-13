@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Laravel package (fork of `ymigval/laravel-model-cache`) that caches Eloquent queries via a cache-aware builder with tag-based invalidation. PHP `^8.2`, Laravel 11–13, Orchestra Testbench for tests. Namespace: `YMigVal\LaravelModelCache`.
+Laravel package (fork of `ymigval/laravel-model-cache`) that caches Eloquent queries via a cache-aware builder with tag-based invalidation. PHP `^8.2`, Laravel 11–13, Orchestra Testbench for tests. Namespace: `Daika7ana\LaravelModelCache`.
 
 ## Commands
 

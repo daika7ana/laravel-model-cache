@@ -1,6 +1,6 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Exceptions;
+namespace Daika7ana\LaravelModelCache\Exceptions;
 
 /**
  * Thrown internally when an eager-load constraint captures state that cannot be

@@ -1,12 +1,12 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests\Fixtures\Models;
+namespace Daika7ana\LaravelModelCache\Tests\Fixtures\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\HasOneThrough;
-use YMigVal\LaravelModelCache\HasCachedQueries;
+use Daika7ana\LaravelModelCache\HasCachedQueries;
 
 class Author extends Model
 {

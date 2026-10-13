@@ -1,15 +1,15 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests\Unit;
+namespace Daika7ana\LaravelModelCache\Tests\Unit;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Author;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Comment;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Tag;
-use YMigVal\LaravelModelCache\Tests\TestCase;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\Author;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\Comment;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\Tag;
+use Daika7ana\LaravelModelCache\Tests\TestCase;
 
 class ModelRelationshipsTest extends TestCase
 {

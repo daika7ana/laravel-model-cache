@@ -1,13 +1,13 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests\Feature;
+namespace Daika7ana\LaravelModelCache\Tests\Feature;
 
 use Illuminate\Support\Facades\Cache;
 use PHPUnit\Framework\Attributes\Test;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithGlobalScope;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Tag;
-use YMigVal\LaravelModelCache\Tests\TestCase;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\Post;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\PostWithGlobalScope;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\Tag;
+use Daika7ana\LaravelModelCache\Tests\TestCase;
 
 class CacheIntegrationTest extends TestCase
 {

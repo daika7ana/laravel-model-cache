@@ -1,6 +1,6 @@
 <?php
 
-namespace YMigVal\LaravelModelCache;
+namespace Daika7ana\LaravelModelCache;
 
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 

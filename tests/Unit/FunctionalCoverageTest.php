@@ -1,14 +1,14 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests\Unit;
+namespace Daika7ana\LaravelModelCache\Tests\Unit;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithCustomCache;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
-use YMigVal\LaravelModelCache\Tests\TestCase;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\Post;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\PostWithCustomCache;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
+use Daika7ana\LaravelModelCache\Tests\TestCase;
 
 /**
  * Functional coverage and edge case tests.

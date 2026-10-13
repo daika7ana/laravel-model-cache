@@ -22,7 +22,7 @@ By participating, you agree to follow the [Laravel Code of Conduct](https://lara
 3. Add upstream remote:
 
 ```bash
-git remote add upstream https://github.com/ymigval/laravel-model-cache.git
+git remote add upstream https://github.com/daika7ana/laravel-model-cache.git
 ```
 
 4. Install dependencies:

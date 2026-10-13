@@ -1,6 +1,6 @@
 <?php
 
-namespace YMigVal\LaravelModelCache;
+namespace Daika7ana\LaravelModelCache;
 
 final class ModelCacheDebugger
 {

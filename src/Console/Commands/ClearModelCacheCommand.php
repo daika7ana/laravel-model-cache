@@ -1,6 +1,6 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Console\Commands;
+namespace Daika7ana\LaravelModelCache\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Cache\Repository;
@@ -132,7 +132,7 @@ class ClearModelCacheCommand extends Command
     {
         $traits = class_uses_recursive($class);
 
-        return isset($traits['YMigVal\LaravelModelCache\HasCachedQueries']);
+        return isset($traits['Daika7ana\LaravelModelCache\HasCachedQueries']);
     }
 
     /**

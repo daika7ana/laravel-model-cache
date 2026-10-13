@@ -1,20 +1,20 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests\Unit;
+namespace Daika7ana\LaravelModelCache\Tests\Unit;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
-use YMigVal\LaravelModelCache\CacheableBuilder;
-use YMigVal\LaravelModelCache\Contracts\CacheableBuilderContract;
-use YMigVal\LaravelModelCache\HasCacheableModel;
-use YMigVal\LaravelModelCache\HasCachedQueries;
-use YMigVal\LaravelModelCache\HasCachedRelationships;
-use YMigVal\LaravelModelCache\ModelCacheDebugger;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
-use YMigVal\LaravelModelCache\Tests\Fixtures\RecorderLogger;
-use YMigVal\LaravelModelCache\Tests\TestCase;
+use Daika7ana\LaravelModelCache\CacheableBuilder;
+use Daika7ana\LaravelModelCache\Contracts\CacheableBuilderContract;
+use Daika7ana\LaravelModelCache\HasCacheableModel;
+use Daika7ana\LaravelModelCache\HasCachedQueries;
+use Daika7ana\LaravelModelCache\HasCachedRelationships;
+use Daika7ana\LaravelModelCache\ModelCacheDebugger;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\Post;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\RecorderLogger;
+use Daika7ana\LaravelModelCache\Tests\TestCase;
 
 /**
  * Regression tests for bug fixes.

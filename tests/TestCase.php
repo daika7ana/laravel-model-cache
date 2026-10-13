@@ -1,11 +1,11 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests;
+namespace Daika7ana\LaravelModelCache\Tests;
 
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
-use YMigVal\LaravelModelCache\ModelCacheServiceProvider;
+use Daika7ana\LaravelModelCache\ModelCacheServiceProvider;
 
 abstract class TestCase extends Orchestra
 {

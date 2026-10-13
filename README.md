@@ -2,9 +2,9 @@
 
 Cache Eloquent queries with minimal code changes and automatic invalidation.
 
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/ymigval/laravel-model-cache.svg?style=flat-square)](https://packagist.org/packages/ymigval/laravel-model-cache)
-[![Total Downloads](https://img.shields.io/packagist/dt/ymigval/laravel-model-cache.svg?style=flat-square)](https://packagist.org/packages/ymigval/laravel-model-cache)
-[![License](https://img.shields.io/packagist/l/ymigval/laravel-model-cache.svg?style=flat-square)](LICENSE.md)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/daika7ana/laravel-model-cache.svg?style=flat-square)](https://packagist.org/packages/daika7ana/laravel-model-cache)
+[![Total Downloads](https://img.shields.io/packagist/dt/daika7ana/laravel-model-cache.svg?style=flat-square)](https://packagist.org/packages/daika7ana/laravel-model-cache)
+[![License](https://img.shields.io/packagist/l/daika7ana/laravel-model-cache.svg?style=flat-square)](LICENSE.md)
 
 > This repository is a fork of the original project by Yordan:
 > https://github.com/ymigval/laravel-model-cache
@@ -29,7 +29,7 @@ Cache Eloquent queries with minimal code changes and automatic invalidation.
 ### 1) Install
 
 ```bash
-composer require ymigval/laravel-model-cache
+composer require daika7ana/laravel-model-cache
 ```
 
 ### 2) Add the trait to a model
@@ -40,7 +40,7 @@ composer require ymigval/laravel-model-cache
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use YMigVal\LaravelModelCache\HasCachedQueries;
+use Daika7ana\LaravelModelCache\HasCachedQueries;
 
 class Post extends Model
 {

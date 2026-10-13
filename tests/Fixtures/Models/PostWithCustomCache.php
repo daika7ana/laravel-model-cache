@@ -1,9 +1,9 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests\Fixtures\Models;
+namespace Daika7ana\LaravelModelCache\Tests\Fixtures\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use YMigVal\LaravelModelCache\HasCachedQueries;
+use Daika7ana\LaravelModelCache\HasCachedQueries;
 
 class PostWithCustomCache extends Model
 {

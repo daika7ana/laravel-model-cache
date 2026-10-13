@@ -1,6 +1,6 @@
 <?php
 
-namespace YMigVal\LaravelModelCache;
+namespace Daika7ana\LaravelModelCache;
 
 /**
  * Helper trait to flush cache when relationship methods are called.
@@ -80,7 +80,7 @@ trait HasCachedRelationships
      * @param  string  $parentKey
      * @param  string  $relatedKey
      * @param  string|null  $relationName
-     * @return \YMigVal\LaravelModelCache\CachingBelongsToMany
+     * @return \Daika7ana\LaravelModelCache\CachingBelongsToMany
      */
     protected function newBelongsToMany(
         $query,

@@ -1,6 +1,6 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Contracts;
+namespace Daika7ana\LaravelModelCache\Contracts;
 
 use Illuminate\Database\Eloquent\Collection;
 

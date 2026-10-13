@@ -7,7 +7,7 @@ Runnable patterns for common scenarios. The snippets mirror the package's test s
 Use `HasCacheableModel` when pivot changes must invalidate the parent model's cache:
 
 ```php
-use YMigVal\LaravelModelCache\HasCacheableModel;
+use Daika7ana\LaravelModelCache\HasCacheableModel;
 
 class Post extends Model
 {

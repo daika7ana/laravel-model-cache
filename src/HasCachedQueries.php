@@ -1,10 +1,10 @@
 <?php
 
-namespace YMigVal\LaravelModelCache;
+namespace Daika7ana\LaravelModelCache;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
-use YMigVal\LaravelModelCache\Contracts\CacheableBuilderContract;
+use Daika7ana\LaravelModelCache\Contracts\CacheableBuilderContract;
 
 /**
  * @property ?int $cacheMinutes

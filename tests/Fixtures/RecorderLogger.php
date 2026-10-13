@@ -1,6 +1,6 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests\Fixtures;
+namespace Daika7ana\LaravelModelCache\Tests\Fixtures;
 
 use Psr\Log\AbstractLogger;
 

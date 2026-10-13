@@ -1,14 +1,14 @@
 <?php
 
-namespace YMigVal\LaravelModelCache;
+namespace Daika7ana\LaravelModelCache;
 
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Cache;
-use YMigVal\LaravelModelCache\Exceptions\UnfingerprintableEagerLoadException;
+use Daika7ana\LaravelModelCache\Exceptions\UnfingerprintableEagerLoadException;
 
-class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Contracts\CacheableBuilderContract
+class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\Contracts\CacheableBuilderContract
 {
     /**
      * The number of minutes to cache the query.
@@ -763,11 +763,23 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
     protected function rememberWithLock(string $cacheKey, int $seconds, callable $callback, ?array $cacheTags = null)
     {
         if (! config('model-cache.use_cache_locks', false)) {
-            if ($cacheTags && $this->supportsTags($this->getCacheDriver())) {
-                return $this->getCacheDriver()->tags($cacheTags)->remember($cacheKey, $seconds, $callback);
-            }
+            $missed = false;
+            $wrapped = function () use ($callback, &$missed) {
+                $missed = true;
 
-            return $this->getCacheDriver()->remember($cacheKey, $seconds, $callback);
+                return $callback();
+            };
+
+            $driver = $this->getCacheDriver();
+            $result = ($cacheTags && $this->supportsTags($driver))
+                ? $driver->tags($cacheTags)->remember($cacheKey, $seconds, $wrapped)
+                : $driver->remember($cacheKey, $seconds, $wrapped);
+
+            resolve(ModelCacheDebugger::class)->debug(
+                ($missed ? 'Cache miss, executing query for key: ' : 'Cache hit for key: ') . $cacheKey,
+            );
+
+            return $result;
         }
 
         $cache = $this->getCacheDriver();
@@ -783,6 +795,8 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             }
 
             if ($cached !== null) {
+                resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
+
                 return $cached;
             }
         } catch (\Throwable $e) {
@@ -793,6 +807,8 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
         $lock = $cache->lock($lockKey, $lockDuration);
 
         if ($lock->get()) {
+            resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
+
             try {
                 $result = $callback();
 
@@ -821,16 +837,22 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
                     : $cache->get($cacheKey);
             } catch (\Throwable $e) {
                 // If the re-read fails, just execute the query directly
+                resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
+
                 return $callback();
             }
 
             if ($cached !== null) {
+                resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
+
                 return $cached;
             }
         }
 
         // The lock holder is still computing past the lock duration — execute
         // the query directly instead of returning null to a caller expecting a Collection.
+        resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
+
         return $callback();
     }
 

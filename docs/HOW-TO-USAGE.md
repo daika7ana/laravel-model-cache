@@ -8,7 +8,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use YMigVal\LaravelModelCache\HasCachedQueries;
+use Daika7ana\LaravelModelCache\HasCachedQueries;
 
 class Post extends Model
 {
@@ -43,7 +43,7 @@ $post = Post::whereKey(1)->firstFromCache();
 Add `HasCachedRelationships` (or the combined `HasCacheableModel`). Pivot changes via `attach()`, `detach()`, `sync()`, `syncWithoutDetaching()`, and `updateExistingPivot()` flush the cache automatically:
 
 ```php
-use YMigVal\LaravelModelCache\HasCacheableModel;
+use Daika7ana\LaravelModelCache\HasCacheableModel;
 
 class Post extends Model
 {

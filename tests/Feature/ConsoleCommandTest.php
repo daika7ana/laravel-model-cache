@@ -1,6 +1,6 @@
 <?php
 
-namespace YMigVal\LaravelModelCache\Tests\Feature;
+namespace Daika7ana\LaravelModelCache\Tests\Feature;
 
 use Illuminate\Console\OutputStyle;
 use Illuminate\Support\Facades\Cache;
@@ -8,12 +8,12 @@ use Mockery;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\BufferedOutput;
-use YMigVal\LaravelModelCache\Console\Commands\ClearModelCacheCommand;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithoutCache;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Tag;
-use YMigVal\LaravelModelCache\Tests\Fixtures\Models\ThrowingFlushModel;
-use YMigVal\LaravelModelCache\Tests\TestCase;
+use Daika7ana\LaravelModelCache\Console\Commands\ClearModelCacheCommand;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\Post;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\PostWithoutCache;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\Tag;
+use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\ThrowingFlushModel;
+use Daika7ana\LaravelModelCache\Tests\TestCase;
 
 class ConsoleCommandTest extends TestCase
 {
