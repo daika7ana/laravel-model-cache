@@ -3,6 +3,7 @@
 namespace YMigVal\LaravelModelCache\Tests\Unit;
 
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Author;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Comment;
@@ -924,5 +925,44 @@ class ModelRelationshipsTest extends TestCase
         $this->assertEquals($futureUpdatedAt->timestamp, $olderComment->updated_at->timestamp);
 
         $this->assertEquals('Will Become Latest', $post->fresh()->mostRecentlyUpdatedComment->author);
+    }
+
+    #[Test]
+    public function it_invalidates_with_count_and_with_sum_when_the_related_model_is_written()
+    {
+        // withCount()/withSum() compile into the parent query's SQL (a subquery
+        // select), not into eager loads, so the related model has no dedicated tag.
+        $post = PostWithRelationships::create([
+            'title' => 'Post',
+            'content' => 'Content',
+            'published' => true,
+        ]);
+
+        $first = Comment::create([
+            'post_id' => $post->id,
+            'author' => 'A',
+            'body' => 'First',
+        ]);
+
+        // Cache the parent query carrying the aggregate subqueries.
+        $cached = PostWithRelationships::withCount('comments')->withSum('comments', 'id')->get();
+        $this->assertEquals(1, $cached->first()->comments_count);
+        $this->assertEquals($first->id, $cached->first()->comments_sum_id);
+
+        // A related-model write must invalidate that parent query.
+        $second = Comment::create([
+            'post_id' => $post->id,
+            'author' => 'B',
+            'body' => 'Second',
+        ]);
+
+        DB::enableQueryLog();
+        $fresh = PostWithRelationships::withCount('comments')->withSum('comments', 'id')->get();
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertGreaterThan(0, $queries, 'A related write must invalidate a withCount()/withSum() parent query');
+        $this->assertEquals(2, $fresh->first()->comments_count);
+        $this->assertEquals($first->id + $second->id, $fresh->first()->comments_sum_id);
     }
 }

@@ -364,4 +364,72 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
         $this->assertGreaterThan(0, $firstQueries, 'First read should hit the database');
         $this->assertEquals(0, $secondQueries, 'Second read should be served from cache');
     }
+
+    #[Test]
+    public function it_caches_aggregates_and_pagination_with_stampede_locks_enabled()
+    {
+        config()->set('model-cache.use_cache_locks', true);
+
+        Post::create(['title' => 'Locked', 'content' => 'Content', 'published' => true]);
+
+        DB::enableQueryLog();
+        Post::where('published', true)->count();
+        Post::where('published', true)->paginateFromCache(10);
+        $firstQueries = count(DB::getQueryLog());
+        DB::flushQueryLog();
+
+        DB::enableQueryLog();
+        Post::where('published', true)->count();
+        Post::where('published', true)->paginateFromCache(10);
+        $secondQueries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertGreaterThan(0, $firstQueries);
+        $this->assertSame(0, $secondQueries, 'Aggregates and pagination must be cached with locks enabled');
+    }
+
+    #[Test]
+    public function it_executes_aggregates_when_the_stampede_lock_is_held()
+    {
+        config()->set('model-cache.use_cache_locks', true);
+        // Keep the polling loop short so the fallback path runs fast in tests.
+        config()->set('model-cache.cache_lock_seconds', 1);
+
+        Post::create(['title' => 'Locked', 'content' => 'Content', 'published' => true]);
+
+        $builder = Post::where('published', true);
+        $lock = Cache::store()->lock('stampede:' . $builder->getCacheKey(['count', '*'], false), 30);
+        $lock->get();
+
+        try {
+            // Another request holds the aggregate lock and is still computing —
+            // the read must execute the query directly instead of returning null.
+            $this->assertSame(1, $builder->count());
+        } finally {
+            $lock->forceRelease();
+        }
+    }
+
+    #[Test]
+    public function it_warns_and_falls_back_when_the_configured_store_is_invalid()
+    {
+        // A bad model-cache store must not break reads: warn, then use the default.
+        $logger = new RecorderLogger();
+        $this->app->instance('log', $logger);
+
+        config()->set('model-cache.cache_store', 'does_not_exist');
+
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+
+        $posts = Post::where('published', true)->get();
+
+        $this->assertCount(1, $posts);
+
+        $warnings = array_filter(
+            $logger->records,
+            fn(array $record) => $record[0] === 'warning' && str_contains($record[1], 'does_not_exist'),
+        );
+
+        $this->assertNotEmpty($warnings, 'An invalid model-cache store must log a warning before falling back');
+    }
 }

@@ -6,7 +6,7 @@ use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
+use YMigVal\LaravelModelCache\Exceptions\UnfingerprintableEagerLoadException;
 
 class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Contracts\CacheableBuilderContract
 {
@@ -40,6 +40,25 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     protected $cacheLockSeconds;
 
+    /**
+     * Memoized eager-load constraint fingerprints, keyed by closure instance.
+     * A WeakMap auto-evicts entries when a closure is freed (e.g. after
+     * without()/withOnly()), so a reused object id can never return a stale
+     * fingerprint.
+     *
+     * @var \WeakMap|null
+     */
+    protected $closureFingerprints;
+
+    /**
+     * Set when an eager-load constraint captures state that cannot be
+     * fingerprinted (e.g. an object holding a closure). Such a query must not
+     * use the cache at all — any key we build would be unsafe.
+     *
+     * @var bool
+     */
+    protected $eagerLoadUnfingerprintable = false;
+
     public function __construct($builder, $cacheMinutes = null, $cachePrefix = null, $cacheLockSeconds = null)
     {
         $this->cacheMinutes = $cacheMinutes;
@@ -56,13 +75,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function touch($column = null)
     {
-        $result = parent::touch($column);
-
-        if ($result > 0) {
-            $this->flushModelOrQueryCache();
-        }
-
-        return $result;
+        return $this->flushAfter(parent::touch($column), 'touch');
     }
 
     /**
@@ -102,6 +115,15 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
 
         $minutes = $this->cacheMinutes ?: config('model-cache.cache_duration', 60);
         $cacheKey = $this->getCacheKey($columns);
+
+        if ($this->eagerLoadUnfingerprintable) {
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->debug('Eager-load constraint could not be fingerprinted or resolved; bypassing cache.');
+            }
+
+            return $this->getWithoutCache($columns);
+        }
+
         $cacheTags = $this->getCacheTags();
         $cache = $this->getCacheDriver();
 
@@ -109,7 +131,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             return $this->rememberWithLock($cacheKey, $minutes * 60, function () use ($columns) {
                 return $this->getWithoutCache($columns);
             }, $cacheTags);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             if (config('model-cache.debug_mode', false)) {
                 resolve(ModelCacheDebugger::class)->error("Cache read failed, bypassing cache: {$e->getMessage()}");
             }
@@ -152,34 +174,46 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      * Get a unique cache key for the complete query.
      *
      * @param  array  $columns
+     * @param  bool  $withEagerLoads  Aggregates never eager-load, so they pass false.
      * @return string
      */
-    public function getCacheKey($columns = ['*']): string
+    public function getCacheKey($columns = ['*'], bool $withEagerLoads = true): string
     {
         // This is the prefix defined in our package config
         $configPrefix = $this->cachePrefix ?? config('model-cache.cache_key_prefix', 'model_cache_');
 
+        // Fresh evaluation: a previous key computation must not leave a stale
+        // uncacheable verdict behind for this builder.
+        $this->eagerLoadUnfingerprintable = false;
+
+        $connection = $this->model->getConnection();
+
         // Create unique components for our key
         $keyComponents = [
             $configPrefix,
+            get_class($this->model),
+            $connection->getName(),
+            $connection->getDatabaseName(),
             $this->model->getTable(),
             $this->toSql(),
-            json_encode($this->getBindings()),
+            $this->bindingsFingerprint(),
             json_encode($columns),
             config('model-cache.include_locale_in_key', false) ? app()->getLocale() : null,
         ];
 
-        // Include eager loaded relationships in the cache key
-        if (count($this->eagerLoad) > 0) {
-            $keyComponents[] = 'with:' . json_encode(array_keys($this->eagerLoad));
+        // Include eager loaded relationships, including any `with()` constraint
+        // closures, so two differently-constrained eager loads cannot collide.
+        if ($withEagerLoads && count($this->eagerLoad) > 0) {
+            $keyComponents[] = 'with:' . $this->eagerLoadFingerprint();
         }
 
-        // Create a hash from all components
-        $uniqueKey = $this->hashIdentifier(implode('|', $keyComponents));
+        // serialize() (not implode) so a component can never forge the separator
+        // and produce the same concatenation as a different component list.
+        $uniqueKey = $this->hashIdentifier(serialize($keyComponents));
 
         // Add debug logging if enabled
         if (config('model-cache.debug_mode', false)) {
-            resolve(ModelCacheDebugger::class)->debug("Generated cache key: {$uniqueKey} for query: {$this->toSql()} with bindings: " . json_encode($this->getBindings()) . ' and relations: ' . json_encode(array_keys($this->eagerLoad)));
+            resolve(ModelCacheDebugger::class)->debug("Generated cache key: {$uniqueKey} for query: {$this->toSql()} with " . count($this->getBindings()) . ' bindings and relations: ' . json_encode(array_keys($this->eagerLoad)));
         }
 
         // Return only the unique hash - Laravel will handle adding its own prefix
@@ -203,30 +237,43 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function flushQueryCache($columns = ['*']): bool
     {
+        $connection = $this->model->getConnection();
+
+        // Defer until the transaction commits so a rollback never invalidates cache.
+        if ($connection->transactionLevel() > 0) {
+            $connection->afterCommit(fn() => $this->flushQueryCache($columns));
+
+            return true;
+        }
+
         try {
             $cacheKey = $this->getCacheKey($columns);
             $cache = $this->getCacheDriver();
+            $cacheTags = $this->getCacheTags();
+            $tagged = $cacheTags && $this->supportsTags($cache);
 
             if (config('model-cache.debug_mode', false)) {
                 resolve(ModelCacheDebugger::class)->info("Flushing specific query cache: {$cacheKey}");
             }
 
-            // Try to forget this specific key
-            $result = $cache->forget($cacheKey);
+            // Tagged stores scope the entry under the tag namespace, so the
+            // specific-key forget must use the same tag set it was written with.
+            $result = $tagged
+                ? $cache->tags($cacheTags)->forget($cacheKey)
+                : $cache->forget($cacheKey);
+
             if ($result && config('model-cache.debug_mode', false)) {
                 resolve(ModelCacheDebugger::class)->debug("Successfully removed specific cache key: {$cacheKey}");
             }
 
-            // Try with tags if supported
-            $cacheTags = $this->getCacheTags();
-            if ($cacheTags && $this->supportsTags($cache)) {
+            if ($tagged) {
                 try {
                     $cache->tags($cacheTags)->flush();
                     $result = true;
                     if (config('model-cache.debug_mode', false)) {
                         resolve(ModelCacheDebugger::class)->debug('Successfully flushed cache using tags for model: ' . get_class($this->model));
                     }
-                } catch (\Exception $e) {
+                } catch (\Throwable $e) {
                     if (config('model-cache.debug_mode', false)) {
                         resolve(ModelCacheDebugger::class)->debug("Could not flush by tags: {$e->getMessage()}");
                     }
@@ -234,7 +281,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             }
 
             return $result;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             resolve(ModelCacheDebugger::class)->error("Error flushing query cache: {$e->getMessage()}");
 
             return false;
@@ -329,6 +376,8 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             $pageName,
             $page,
             json_encode($columns),
+            // The rendered paginator embeds its path, so the key must too.
+            \Illuminate\Pagination\Paginator::resolveCurrentPath(),
         ];
 
         // A custom total produces a different paginator, so it must produce a different key
@@ -338,21 +387,24 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
 
         $cacheKey = $this->getCacheKey($keyComponents);
 
+        if ($this->eagerLoadUnfingerprintable) {
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->debug('Eager-load constraint could not be fingerprinted or resolved; bypassing cache.');
+            }
+
+            return parent::paginate($perPage, $columns, $pageName, $page, $total);
+        }
+
         $minutes = $this->cacheMinutes ?: config('model-cache.cache_duration', 60);
         $cacheTags = $this->getCacheTags();
-        $cache = $this->getCacheDriver();
 
         $callback = function () use ($perPage, $columns, $pageName, $page, $total) {
             return parent::paginate($perPage, $columns, $pageName, $page, $total);
         };
 
         try {
-            if ($cacheTags && $this->supportsTags($cache)) {
-                return $cache->tags($cacheTags)->remember($cacheKey, $minutes * 60, $callback);
-            }
-
-            return $cache->remember($cacheKey, $minutes * 60, $callback);
-        } catch (\Exception $e) {
+            return $this->rememberWithLock($cacheKey, $minutes * 60, $callback, $cacheTags);
+        } catch (\Throwable $e) {
             if (config('model-cache.debug_mode', false)) {
                 resolve(ModelCacheDebugger::class)->error("Cache read failed for paginate, bypassing cache: {$e->getMessage()}");
             }
@@ -424,11 +476,6 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function count($columns = '*')
     {
-        // Only use cache if cacheMinutes is not set to 0
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return parent::count($columns);
-        }
-
         return $this->countFromCache($columns);
     }
 
@@ -440,11 +487,6 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function sum($column)
     {
-        // Only use cache if cacheMinutes is not set to 0
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return parent::sum($column);
-        }
-
         return $this->sumFromCache($column);
     }
 
@@ -456,11 +498,6 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function max($column)
     {
-        // Only use cache if cacheMinutes is not set to 0
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return parent::max($column);
-        }
-
         return $this->maxFromCache($column);
     }
 
@@ -472,11 +509,6 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function min($column)
     {
-        // Only use cache if cacheMinutes is not set to 0
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return parent::min($column);
-        }
-
         return $this->minFromCache($column);
     }
 
@@ -488,11 +520,6 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function avg($column)
     {
-        // Only use cache if cacheMinutes is not set to 0
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return parent::avg($column);
-        }
-
         return $this->avgFromCache($column);
     }
 
@@ -514,18 +541,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function update(array $values)
     {
-        // Execute the update operation
-        $result = parent::update($values);
-
-        // Flush the cache for this model
-        if ($result) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info('Flushing cache after `update` operation for model: ' . get_class($this->model));
-            }
-            $this->flushModelOrQueryCache();
-        }
-
-        return $result;
+        return $this->flushAfter(parent::update($values), 'update');
     }
 
     /**
@@ -535,15 +551,18 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function delete()
     {
-        // Execute the delete operation
         $result = parent::delete();
 
-        // Flush the cache for this model if any records were deleted
-        if ($result) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info('Flushing cache after `delete` operation for model: ' . get_class($this->model));
-            }
-            $this->flushModelOrQueryCache();
+        // A soft delete routes through update(), which already flushed and marked
+        // this model — don't flush a second time. Hard deletes never mark, so a
+        // stale marker from an earlier update() on this builder must not suppress
+        // their flush.
+        $softDeleted = method_exists($this->model, 'runSoftDelete')
+            && method_exists($this->model, 'consumeCacheFlushMarker')
+            && $this->model::consumeCacheFlushMarker($this->model);
+
+        if ($result && ! $softDeleted) {
+            $this->flushAfter($result, 'delete');
         }
 
         return $result;
@@ -558,18 +577,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function increment($column, $amount = 1, array $extra = [])
     {
-        // Execute the increment operation
-        $result = parent::increment($column, $amount, $extra);
-
-        // Flush the cache for this model
-        if ($result) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info('Flushing cache after `increment` operation for model: ' . get_class($this->model));
-            }
-            $this->flushModelOrQueryCache();
-        }
-
-        return $result;
+        return $this->flushAfter(parent::increment($column, $amount, $extra), 'increment');
     }
 
     /**
@@ -581,18 +589,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function decrement($column, $amount = 1, array $extra = [])
     {
-        // Execute the decrement operation
-        $result = parent::decrement($column, $amount, $extra);
-
-        // Flush the cache for this model
-        if ($result) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info('Flushing cache after `decrement` operation for model: ' . get_class($this->model));
-            }
-            $this->flushModelOrQueryCache();
-        }
-
-        return $result;
+        return $this->flushAfter(parent::decrement($column, $amount, $extra), 'decrement');
     }
 
     /**
@@ -602,18 +599,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function insert(array $values)
     {
-        // Execute the insert operation
-        $result = parent::insert($values);
-
-        // Flush the cache for this model if insert was successful
-        if ($result) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info('Flushing cache after `insert` operation for model: ' . get_class($this->model));
-            }
-            $this->flushModelOrQueryCache();
-        }
-
-        return $result;
+        return $this->flushAfter(parent::insert($values), 'insert');
     }
 
     /**
@@ -623,18 +609,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function insertOrIgnore(array $values)
     {
-        // Execute the insertOrIgnore operation
-        $result = parent::insertOrIgnore($values);
-
-        // Flush the cache for this model if any records were inserted
-        if ($result > 0) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info('Flushing cache after `insertOrIgnore` operation for model: ' . get_class($this->model));
-            }
-            $this->flushModelOrQueryCache();
-        }
-
-        return $result;
+        return $this->flushAfter(parent::insertOrIgnore($values), 'insertOrIgnore');
     }
 
     /**
@@ -645,18 +620,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function insertGetId(array $values, $sequence = null)
     {
-        // Execute the insertGetId operation
-        $result = parent::insertGetId($values, $sequence);
-
-        // Flush the cache for this model
-        if ($result) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info('Flushing cache after `insertGetId` operation for model: ' . get_class($this->model));
-            }
-            $this->flushModelOrQueryCache();
-        }
-
-        return $result;
+        return $this->flushAfter(parent::insertGetId($values, $sequence), 'insertGetId');
     }
 
     /**
@@ -668,18 +632,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function updateOrInsert(array $attributes, array|callable $values = [])
     {
-        // Execute the updateOrInsert operation
-        $result = parent::updateOrInsert($attributes, $values);
-
-        // Flush the cache for this model if operation was successful
-        if ($result) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info('Flushing cache after `updateOrInsert` operation for model: ' . get_class($this->model));
-            }
-            $this->flushModelOrQueryCache();
-        }
-
-        return $result;
+        return $this->flushAfter(parent::updateOrInsert($attributes, $values), 'updateOrInsert');
     }
 
     /**
@@ -691,18 +644,65 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function upsert(array $values, $uniqueBy, $update = null)
     {
-        // Execute the upsert operation
-        $result = parent::upsert($values, $uniqueBy, $update);
+        return $this->flushAfter(parent::upsert($values, $uniqueBy, $update), 'upsert');
+    }
 
-        // Flush the cache for this model if any records were affected
-        if ($result > 0) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info('Flushing cache after `upsert` operation for model: ' . get_class($this->model));
-            }
-            $this->flushModelOrQueryCache();
-        }
+    /**
+     * Increment several columns' values and flush cache.
+     *
+     * @param  array<string, float|int|numeric-string>  $columns
+     * @param  array<string, mixed>  $extra
+     * @return mixed
+     */
+    public function incrementEach(array $columns, array $extra = [])
+    {
+        return $this->flushAfter(parent::incrementEach($columns, $extra), 'incrementEach');
+    }
 
-        return $result;
+    /**
+     * Decrement several columns' values and flush cache.
+     *
+     * @param  array<string, float|int|numeric-string>  $columns
+     * @param  array<string, mixed>  $extra
+     * @return mixed
+     */
+    public function decrementEach(array $columns, array $extra = [])
+    {
+        return $this->flushAfter(parent::decrementEach($columns, $extra), 'decrementEach');
+    }
+
+    /**
+     * Insert records using a subquery and flush cache.
+     *
+     * @param  array  $columns
+     * @param  mixed  $query
+     * @return int
+     */
+    public function insertUsing(array $columns, $query)
+    {
+        return $this->flushAfter(parent::insertUsing($columns, $query), 'insertUsing');
+    }
+
+    /**
+     * Insert records using a subquery while ignoring errors, and flush cache.
+     *
+     * @param  array  $columns
+     * @param  mixed  $query
+     * @return int
+     */
+    public function insertOrIgnoreUsing(array $columns, $query)
+    {
+        return $this->flushAfter(parent::insertOrIgnoreUsing($columns, $query), 'insertOrIgnoreUsing');
+    }
+
+    /**
+     * Update records using a FROM clause and flush cache.
+     *
+     * @return mixed
+     */
+    public function updateFrom(array $values)
+    {
+        return $this->flushAfter(parent::updateFrom($values), 'updateFrom');
     }
 
     /**
@@ -712,14 +712,9 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
      */
     public function truncate()
     {
-        // Execute the truncate operation
         parent::truncate();
 
-        // Always flush the cache after truncate
-        if (config('model-cache.debug_mode', false)) {
-            resolve(ModelCacheDebugger::class)->info('Flushing cache after `truncate` operation for model: ' . get_class($this->model));
-        }
-        $this->flushModelOrQueryCache();
+        $this->flushAfter(true, 'truncate');
     }
 
     /**
@@ -735,18 +730,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             return $this->delete();
         }
 
-        // Execute the force delete operation
-        $result = parent::forceDelete();
-
-        // Flush the cache for this model
-        if ($result) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info('Flushing cache after `forceDelete` operation for model: ' . get_class($this->model));
-            }
-            $this->flushModelOrQueryCache();
-        }
-
-        return $result;
+        return $this->flushAfter(parent::forceDelete(), 'forceDelete');
     }
 
     /**
@@ -762,15 +746,12 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             return 0;
         }
 
-        // Execute the restore operation
         $result = parent::restore();
 
-        // Flush the cache for this model
-        if ($result) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info('Flushing cache after `restore` operation for model: ' . get_class($this->model));
-            }
-            $this->flushModelOrQueryCache();
+        // restore() goes through update(), which already flushed and marked this
+        // model — only flush if it somehow didn't.
+        if ($result && ! (method_exists($this->model, 'consumeCacheFlushMarker') && $this->model::consumeCacheFlushMarker($this->model))) {
+            return $this->flushAfter($result, 'restore');
         }
 
         return $result;
@@ -804,7 +785,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             if ($cached !== null) {
                 return $cached;
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             // Cache miss or error — proceed to lock
         }
 
@@ -838,7 +819,7 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
                 $cached = $cacheTags && $this->supportsTags($cache)
                     ? $cache->tags($cacheTags)->get($cacheKey)
                     : $cache->get($cacheKey);
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 // If the re-read fails, just execute the query directly
                 return $callback();
             }
@@ -866,20 +847,20 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             return parent::{$method}($column);
         }
 
-        $cacheKey = $this->getCacheKey([$method, $column]);
+        // Explicit cache bypass for this query
+        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
+            return parent::{$method}($column);
+        }
+
+        $cacheKey = $this->getCacheKey([$method, $column], false);
         $minutes = $this->cacheMinutes ?: config('model-cache.cache_duration', 60);
         $cacheTags = $this->getCacheTags();
-        $cache = $this->getCacheDriver();
 
         $callback = fn() => parent::{$method}($column);
 
         try {
-            if ($cacheTags && $this->supportsTags($cache)) {
-                return $cache->tags($cacheTags)->remember($cacheKey, $minutes * 60, $callback);
-            }
-
-            return $cache->remember($cacheKey, $minutes * 60, $callback);
-        } catch (\Exception $e) {
+            return $this->rememberWithLock($cacheKey, $minutes * 60, $callback, $cacheTags);
+        } catch (\Throwable $e) {
             if (config('model-cache.debug_mode', false)) {
                 resolve(ModelCacheDebugger::class)->error("Cache read failed for {$method}, bypassing cache: {$e->getMessage()}");
             }
@@ -898,9 +879,28 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
     {
         try {
             return method_exists($cache, 'supportsTags') && $cache->supportsTags();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return false;
         }
+    }
+
+    /**
+     * Flush the cache after a mass operation when it affected rows.
+     *
+     * @param  mixed  $result
+     * @return mixed
+     */
+    protected function flushAfter($result, string $operation)
+    {
+        if ($result) {
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info("Flushing cache after `{$operation}` operation for model: " . get_class($this->model));
+            }
+
+            $this->flushModelOrQueryCache();
+        }
+
+        return $result;
     }
 
     /**
@@ -923,8 +923,10 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             }
         };
 
-        if (DB::transactionLevel() > 0) {
-            DB::afterCommit($flush);
+        $connection = $this->model->getConnection();
+
+        if ($connection->transactionLevel() > 0) {
+            $connection->afterCommit($flush);
         } else {
             $flush();
         }
@@ -948,6 +950,275 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
                 previous: $e,
             );
         }
+    }
+
+    /**
+     * Fingerprint the query bindings losslessly. json_encode() collapses distinct
+     * invalid-UTF-8/binary bindings into the same replacement characters, so string
+     * bindings are base64-encoded first.
+     */
+    protected function bindingsFingerprint($bindings = null): string
+    {
+        $bindings = array_map(
+            fn($binding) => is_string($binding) ? 'b64:' . base64_encode($binding) : $binding,
+            $bindings ?? $this->getBindings(),
+        );
+
+        return (string) json_encode($bindings, JSON_INVALID_UTF8_SUBSTITUTE);
+    }
+
+    /**
+     * Build a stable fingerprint for the eager-load constraints on this query.
+     *
+     * Laravel wraps every `with()` constraint in a combineConstraints() closure,
+     * so we walk captured variables to reach the user's closure. When a capture
+     * cannot be fingerprinted, the constraint is resolved against a fresh relation
+     * and the resulting relation state is fingerprinted instead. Only if that also
+     * fails does the query fall back to bypassing the cache.
+     */
+    protected function eagerLoadFingerprint(): string
+    {
+        $fingerprints = $this->fingerprintEagerLoads($this);
+
+        // Eager-load insertion order must not change the key.
+        ksort($fingerprints);
+
+        return (string) json_encode($fingerprints, JSON_INVALID_UTF8_SUBSTITUTE);
+    }
+
+    /**
+     * Fingerprint a builder's eager loads, grouped by root relation so a dotted
+     * name shares one resolution with its root.
+     *
+     * @return array<string, string>
+     */
+    protected function fingerprintEagerLoads($builder, int $depth = 0): array
+    {
+        $groups = [];
+
+        foreach ($builder->getEagerLoads() as $name => $constraint) {
+            $root = str_contains($name, '.') ? strstr($name, '.', true) : $name;
+            $groups[$root][$name] = $constraint;
+        }
+
+        $fingerprints = [];
+
+        foreach ($groups as $root => $entries) {
+            try {
+                $parts = [];
+
+                foreach ($entries as $name => $constraint) {
+                    $parts[] = $name . '=' . $this->valueFingerprint($constraint, $depth);
+                }
+
+                $fingerprints[$root] = implode(';', $parts);
+            } catch (UnfingerprintableEagerLoadException $e) {
+                $fingerprints[$root] = 'resolved:' . $this->resolveEagerLoadGroup($builder, $root, $entries, $depth);
+            }
+        }
+
+        return $fingerprints;
+    }
+
+    /**
+     * Resolve an un-fingerprintable eager-load group against a fresh relation and
+     * fingerprint the resulting relation state. Falls back to an uncacheable
+     * verdict if the relation cannot be built or the constraint throws.
+     *
+     * @param  array<string, \Closure>  $entries
+     */
+    protected function resolveEagerLoadGroup($builder, string $root, array $entries, int $depth): string
+    {
+        try {
+            $relation = $builder->getRelation($root);
+
+            foreach ($entries as $name => $constraint) {
+                // Dotted entries are applied to nested relations by getRelation();
+                // only the root's own constraint runs here.
+                if ($constraint instanceof \Closure && ! str_contains($name, '.')) {
+                    $constraint($relation);
+                }
+            }
+
+            return $this->relationStateFingerprint($relation, $depth + 1);
+        } catch (\Throwable $e) {
+            $this->eagerLoadUnfingerprintable = true;
+
+            return 'unresolvable';
+        }
+    }
+
+    /**
+     * Fingerprint the complete state of a resolved relation: its underlying query
+     * (SQL + bindings), any nested eager loads, and its own relation-level
+     * properties (pivot columns/values, morph settings, defaults, …).
+     */
+    protected function relationStateFingerprint($relation, int $depth): string
+    {
+        $query = $relation->getQuery();
+
+        $parts = [
+            $query->toSql(),
+            $this->bindingsFingerprint($query->getBindings()),
+        ];
+
+        if (count($query->getEagerLoads()) > 0) {
+            $nested = $this->fingerprintEagerLoads($query, $depth + 1);
+            ksort($nested);
+            $parts[] = 'with:' . json_encode($nested, JSON_INVALID_UTF8_SUBSTITUTE);
+        }
+
+        $props = get_mangled_object_vars($relation);
+
+        foreach ($props as $key => $value) {
+            // Protected/private props are NUL-mangled ("\0*\0query"); strip to the
+            // bare name so we can skip the objects that are not relation state.
+            $name = ($pos = strrpos($key, "\0")) === false ? $key : substr($key, $pos + 1);
+
+            if (in_array($name, ['query', 'parent', 'related'], true)) {
+                continue;
+            }
+
+            // A nested builder (e.g. a one-of-many subquery on latestOfMany/ofMany)
+            // cannot be serialized; its state is already reflected in the relation
+            // query's SQL, so skip it rather than fail the whole resolution.
+            if ($value instanceof Builder || $value instanceof \Illuminate\Database\Query\Builder) {
+                continue;
+            }
+
+            $parts[] = $name . '=' . $this->valueFingerprint($value, $depth + 1);
+        }
+
+        return implode(',', $parts);
+    }
+
+    /**
+     * Fingerprint a captured value (closure, array, object or scalar).
+     *
+     * @param  mixed  $value
+     */
+    protected function valueFingerprint($value, int $depth): string
+    {
+        if ($depth > 6) {
+            throw new UnfingerprintableEagerLoadException('Capture nesting too deep to fingerprint.');
+        }
+
+        if (is_resource($value)) {
+            throw new UnfingerprintableEagerLoadException('Capture contains a resource, which cannot be fingerprinted.');
+        }
+
+        if ($value instanceof \Closure) {
+            return $this->closureFingerprint($value, $depth);
+        }
+
+        if (is_array($value)) {
+            $parts = [];
+
+            foreach ($value as $key => $item) {
+                $parts[] = $key . ':' . $this->valueFingerprint($item, $depth + 1);
+            }
+
+            return '[' . implode(',', $parts) . ']';
+        }
+
+        if (is_object($value)) {
+            return get_class($value) . ':' . $this->objectFingerprint($value, $depth);
+        }
+
+        // base64 keeps invalid-UTF-8 strings lossless (json substitutes every bad
+        // byte with the same replacement char, collapsing distinct captures).
+        if (is_string($value)) {
+            return 'str:' . base64_encode($value);
+        }
+
+        return gettype($value) . ':' . var_export($value, true);
+    }
+
+    /**
+     * Fingerprint an object by its full (including private) serialized state,
+     * hashed with the configured algorithm (xxh128 by default).
+     *
+     * ponytail: serialize() maps a resource handle to `i:0` without throwing, so
+     * two objects differing only by a held resource still collide. Don't capture
+     * resource-bearing objects as eager-load constraint state.
+     *
+     * @param  object  $value
+     */
+    protected function objectFingerprint($value, int $depth): string
+    {
+        if ($depth > 6) {
+            throw new UnfingerprintableEagerLoadException('Capture nesting too deep to fingerprint.');
+        }
+
+        try {
+            return 'ser:' . $this->hashIdentifier(serialize($value));
+        } catch (\Throwable $e) {
+            // Unserializable state (e.g. a captured closure) cannot be fingerprinted
+            // from code identity; the caller will resolve the constraint instead.
+            throw new UnfingerprintableEagerLoadException('Capture contains unserializable state: ' . get_class($value), 0, $e);
+        }
+    }
+
+    /**
+     * Fingerprint a closure by code location, captured values and any bound
+     * `$this` state, memoized per closure instance for this builder's lifetime.
+     */
+    protected function closureFingerprint(\Closure $closure, int $depth): string
+    {
+        $this->closureFingerprints ??= new \WeakMap();
+
+        if (isset($this->closureFingerprints[$closure])) {
+            return $this->closureFingerprints[$closure];
+        }
+
+        try {
+            $reflection = new \ReflectionFunction($closure);
+
+            $parts = [
+                $this->normalizeFilePath((string) $reflection->getFileName()),
+                (string) $reflection->getStartLine(),
+                (string) $reflection->getEndLine(),
+            ];
+
+            foreach ($reflection->getStaticVariables() as $name => $variable) {
+                $parts[] = $name . '=' . $this->valueFingerprint($variable, $depth + 1);
+            }
+
+            // A bound object may carry state the constraint reads ($this->...).
+            // Skip Laravel's combineConstraints() wrapper, whose $this is the query
+            // builder; fingerprinting it would poison every key with query state.
+            $bound = $reflection->getClosureThis();
+
+            if ($bound !== null && ! $bound instanceof Builder) {
+                $parts[] = 'this=' . $this->objectFingerprint($bound, $depth + 1);
+            }
+
+            $fingerprint = implode(',', $parts);
+        } catch (\Throwable $e) {
+            throw new UnfingerprintableEagerLoadException('Closure could not be fingerprinted.', 0, $e);
+        }
+
+        return $this->closureFingerprints[$closure] = $fingerprint;
+    }
+
+    /**
+     * Normalize a file path so cache keys stay stable across deploy directories.
+     */
+    protected function normalizeFilePath(string $path): string
+    {
+        $path = str_replace('\\', '/', $path);
+
+        try {
+            $base = str_replace('\\', '/', base_path()) . '/';
+
+            if (str_starts_with($path, $base)) {
+                return substr($path, strlen($base));
+            }
+        } catch (\Throwable $e) {
+            // No application bound (e.g. bare PHPUnit) — use the path as-is.
+        }
+
+        return $path;
     }
 
     /**
@@ -994,9 +1265,10 @@ class CacheableBuilder extends Builder implements \YMigVal\LaravelModelCache\Con
             } else {
                 $this->cacheDriver = Cache::store();
             }
-        } catch (\Exception $e) {
-            // If there's an issue with the configured cache driver,
-            // fall back to the default driver
+        } catch (\Throwable $e) {
+            // Surface a misconfigured store instead of silently using another one,
+            // then fall back so reads don't break.
+            resolve(ModelCacheDebugger::class)->warning("Configured model cache store is unavailable ({$e->getMessage()}); falling back to the default cache store.");
             $this->cacheDriver = Cache::store(config('cache.default'));
         }
 

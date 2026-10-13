@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\Post;
 use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithCustomCache;
+use YMigVal\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
 use YMigVal\LaravelModelCache\Tests\TestCase;
 
 /**
@@ -163,6 +164,28 @@ class FunctionalCoverageTest extends TestCase
         $this->assertCount(10, $page2);
         $this->assertGreaterThan(0, $firstQueries);
         $this->assertGreaterThan(0, $secondQueries, 'withoutCache() paginate should always hit the database');
+    }
+
+    #[Test]
+    public function it_keeps_paginator_links_per_request_path()
+    {
+        for ($i = 1; $i <= 3; $i++) {
+            Post::create(['title' => "Post $i", 'content' => "Content $i", 'published' => true]);
+        }
+
+        // Same query, two different routes: the second must not reuse the first
+        // paginator (whose pagination links point at the first path).
+        \Illuminate\Pagination\Paginator::currentPathResolver(fn() => '/posts');
+        $posts = Post::where('published', true)->paginateFromCache(10);
+
+        \Illuminate\Pagination\Paginator::currentPathResolver(fn() => '/admin/posts');
+        $admin = Post::where('published', true)->paginateFromCache(10);
+
+        // Restore the default path resolver for the rest of the suite.
+        \Illuminate\Pagination\Paginator::currentPathResolver(fn() => '/');
+
+        $this->assertSame('/posts', $posts->path());
+        $this->assertSame('/admin/posts', $admin->path());
     }
 
     #[Test]
@@ -498,10 +521,34 @@ class FunctionalCoverageTest extends TestCase
     {
         Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
 
-        $key1 = Post::query()->where('published', true)->getCacheKey();
-        $key2 = PostWithCustomCache::query()->where('published', true)->getCacheKey();
+        $keyPost = Post::query()->where('published', true)->getCacheKey();
+        $keyCustom = PostWithCustomCache::query()->where('published', true)->getCacheKey();
 
-        $this->assertNotEquals($key1, $key2, 'Different models on same table should have different cache keys');
+        // Both of these share the `posts` table AND the default key prefix.
+        $keyRelationships = PostWithRelationships::query()->where('published', true)->getCacheKey();
+
+        $this->assertNotSame($keyPost, $keyCustom, 'Different models on same table should have different cache keys');
+        $this->assertNotSame($keyPost, $keyRelationships, 'Two default-prefix models on the same table must not share a key');
+    }
+
+    #[Test]
+    public function it_generates_different_keys_for_different_connections()
+    {
+        config()->set('database.connections.secondary', config('database.connections.' . config('database.default')));
+
+        $keyDefault = Post::query()->where('published', true)->getCacheKey();
+        $keySecondary = (new Post())->setConnection('secondary')->newQuery()->where('published', true)->getCacheKey();
+
+        $this->assertNotSame($keyDefault, $keySecondary, 'The same query on different connections must not share a key');
+    }
+
+    #[Test]
+    public function it_generates_the_same_key_regardless_of_eager_load_order()
+    {
+        $keyAB = PostWithRelationships::with(['author', 'tags'])->getCacheKey();
+        $keyBA = PostWithRelationships::with(['tags', 'author'])->getCacheKey();
+
+        $this->assertSame($keyAB, $keyBA, 'Eager-load insertion order must not change the cache key');
     }
 
     #[Test]
@@ -529,5 +576,70 @@ class FunctionalCoverageTest extends TestCase
         // Cached call
         $cached = Post::whereRaw('views > ?', [50])->get();
         $this->assertCount(1, $cached);
+    }
+
+    #[Test]
+    public function it_invalidates_cache_on_increment_each()
+    {
+        $post = Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true, 'views' => 0]);
+
+        // Prime the cache
+        Post::where('id', $post->id)->get();
+
+        Post::where('id', $post->id)->incrementEach(['views' => 5]);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $fresh = Post::where('id', $post->id)->get();
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertSame(5, (int) $fresh->first()->views);
+        $this->assertGreaterThan(0, $queries, 'incrementEach() must invalidate the cached query');
+    }
+
+    #[Test]
+    public function it_invalidates_cache_on_decrement_each()
+    {
+        $post = Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true, 'views' => 10]);
+
+        Post::where('id', $post->id)->get();
+
+        Post::where('id', $post->id)->decrementEach(['views' => 4]);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $fresh = Post::where('id', $post->id)->get();
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertSame(6, (int) $fresh->first()->views);
+        $this->assertGreaterThan(0, $queries, 'decrementEach() must invalidate the cached query');
+    }
+
+    #[Test]
+    public function it_invalidates_cache_on_insert_using()
+    {
+        Post::create(['title' => 'Source', 'content' => 'Content', 'published' => true, 'views' => 3]);
+
+        // Prime a cached count so we can prove the insert invalidates it.
+        $before = Post::where('published', true)->count();
+        $this->assertSame(1, $before);
+
+        $inserted = Post::query()->insertUsing(
+            ['title', 'content', 'published', 'views'],
+            Post::query()->where('published', true)->select('title', 'content', 'published', 'views'),
+        );
+
+        $this->assertSame(1, $inserted, 'insertUsing() must return the affected row count');
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $after = Post::where('published', true)->count();
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertSame(2, $after, 'insertUsing() must invalidate the cached count');
+        $this->assertGreaterThan(0, $queries);
     }
 }

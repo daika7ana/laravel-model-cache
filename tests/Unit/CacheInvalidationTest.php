@@ -585,6 +585,43 @@ class CacheInvalidationTest extends TestCase
         $this->assertGreaterThan(0, $queryCount, 'Cache must be flushed after the transaction commits');
     }
 
+    #[Test]
+    public function it_defers_manual_flush_model_cache_until_commit()
+    {
+        Post::create(['title' => 'Original', 'content' => 'Content', 'published' => true]);
+        Post::where('published', true)->get();
+
+        // Manual flush inside a transaction must be deferred, not run immediately.
+        DB::beginTransaction();
+        Post::flushModelCache();
+        DB::rollBack();
+
+        DB::enableQueryLog();
+        Post::where('published', true)->get();
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertEquals(0, $queryCount, 'Manual flush inside a rolled-back transaction must not invalidate cache');
+    }
+
+    #[Test]
+    public function it_applies_manual_flush_model_cache_after_commit()
+    {
+        Post::create(['title' => 'Original', 'content' => 'Content', 'published' => true]);
+        Post::where('published', true)->get();
+
+        DB::beginTransaction();
+        Post::flushModelCache();
+        DB::commit();
+
+        DB::enableQueryLog();
+        Post::where('published', true)->get();
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertGreaterThan(0, $queryCount, 'Manual flush must take effect after the transaction commits');
+    }
+
     // ========== Transaction-aware relationship invalidation ==========
 
     #[Test]
@@ -677,6 +714,36 @@ class CacheInvalidationTest extends TestCase
     }
 
     #[Test]
+    public function it_flushes_cache_exactly_once_on_mass_soft_delete()
+    {
+        $spy = $this->installDebuggerSpy();
+
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        Post::where('published', true)->get(); // Cache
+
+        $spy->staticallyFlushed = 0; // Reset after setup
+
+        Post::where('published', true)->delete();
+
+        $this->assertEquals(1, $spy->staticallyFlushed, 'Mass soft delete must flush the cache exactly once');
+    }
+
+    #[Test]
+    public function it_flushes_cache_exactly_once_on_mass_restore()
+    {
+        $spy = $this->installDebuggerSpy();
+
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        Post::where('published', true)->delete();
+
+        $spy->staticallyFlushed = 0; // Reset after setup
+
+        Post::onlyTrashed()->where('published', true)->restore();
+
+        $this->assertEquals(1, $spy->staticallyFlushed, 'Mass restore must flush the cache exactly once');
+    }
+
+    #[Test]
     public function it_flushes_cache_exactly_once_on_instance_restore()
     {
         $spy = $this->installDebuggerSpy();
@@ -704,6 +771,31 @@ class CacheInvalidationTest extends TestCase
         $post->forceDelete();
 
         $this->assertEquals(1, $spy->staticallyFlushed, 'Instance forceDelete must flush the cache exactly once');
+    }
+
+    #[Test]
+    public function it_flushes_on_hard_delete_after_an_update_on_the_same_builder()
+    {
+        // Tag has no SoftDeletes, so delete() is a hard delete that must flush.
+        $tag = Tag::create(['name' => 'Original']);
+
+        $builder = Tag::where('id', $tag->id);
+        $builder->update(['name' => 'Updated']);
+
+        // Cache the updated row.
+        Tag::where('name', 'Updated')->get();
+
+        // Delete through the SAME builder. The earlier update left a flush marker,
+        // but this delete never ran the soft-delete path, so it must still flush.
+        $builder->delete();
+
+        DB::enableQueryLog();
+        $tags = Tag::where('name', 'Updated')->get();
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertCount(0, $tags);
+        $this->assertGreaterThan(0, $queries, 'A hard delete must flush even after an update on the same builder');
     }
 
     // ========== Single flush on instance operations ==========

@@ -2,59 +2,15 @@
 
 namespace YMigVal\LaravelModelCache;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Support\Facades\DB;
 
+/**
+ * A belongsToMany relation that flushes the parent model's cache after a pivot
+ * change. attach()/detach()/updateExistingPivot() are the only write paths that
+ * change pivot rows — sync()/syncWithoutDetaching() route through them.
+ */
 class CachingBelongsToMany extends BelongsToMany
 {
-    /**
-     * The parent model that should have its cache flushed.
-     *
-     * @var Model
-     */
-    protected $cacheableParent;
-
-    /**
-     * Create a new belongs to many relationship instance.
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder  $query
-     * @param  \Illuminate\Database\Eloquent\Model  $parent
-     * @param  string  $table
-     * @param  string  $foreignPivotKey
-     * @param  string  $relatedPivotKey
-     * @param  string  $parentKey
-     * @param  string  $relatedKey
-     * @param  string  $relationName
-     * @param  Model  $cacheableParent
-     * @return void
-     */
-    public function __construct(
-        $query,
-        $parent,
-        $table,
-        $foreignPivotKey,
-        $relatedPivotKey,
-        $parentKey,
-        $relatedKey,
-        $relationName = null,
-        $cacheableParent = null,
-    ) {
-        parent::__construct(
-            $query,
-            $parent,
-            $table,
-            $foreignPivotKey,
-            $relatedPivotKey,
-            $parentKey,
-            $relatedKey,
-            $relationName,
-        );
-
-        // Store the parent model that has the cache trait
-        $this->cacheableParent = $cacheableParent ?: $parent;
-    }
-
     /**
      * Attach a model to the parent.
      *
@@ -68,10 +24,8 @@ class CachingBelongsToMany extends BelongsToMany
             return;
         }
 
-        // Call parent method to perform the actual attach
         parent::attach($id, $attributes, $touch);
 
-        // Flush cache after operation
         $this->flushCache('attach');
     }
 
@@ -84,32 +38,10 @@ class CachingBelongsToMany extends BelongsToMany
      */
     public function detach($ids = null, $touch = true)
     {
-        // Call parent method to perform the actual detach
         $result = parent::detach($ids, $touch);
 
-        // Flush cache after operation
         if ($result) {
             $this->flushCache('detach');
-        }
-
-        return $result;
-    }
-
-    /**
-     * Sync the intermediate tables with a list of IDs or collection of models.
-     *
-     * @param  \Illuminate\Support\Collection|\Illuminate\Database\Eloquent\Model|array  $ids
-     * @param  bool  $detaching
-     * @return array
-     */
-    public function sync($ids, $detaching = true)
-    {
-        // Call parent method to perform the actual sync
-        $result = parent::sync($ids, $detaching);
-
-        // Flush cache after operation
-        if ($this->hasPivotChanges($result)) {
-            $this->flushCache('sync');
         }
 
         return $result;
@@ -124,10 +56,8 @@ class CachingBelongsToMany extends BelongsToMany
      */
     public function updateExistingPivot($id, array $attributes, $touch = true)
     {
-        // Call parent method to perform the actual update
         $result = parent::updateExistingPivot($id, $attributes, $touch);
 
-        // Flush cache after operation
         if ($result) {
             $this->flushCache('updateExistingPivot');
         }
@@ -136,26 +66,7 @@ class CachingBelongsToMany extends BelongsToMany
     }
 
     /**
-     * Sync the intermediate tables with a list of IDs without detaching.
-     *
-     * @param  \Illuminate\Support\Collection|\Illuminate\Database\Eloquent\Model|array  $ids
-     * @return array
-     */
-    public function syncWithoutDetaching($ids)
-    {
-        // Call parent method to perform the actual sync
-        $result = parent::syncWithoutDetaching($ids);
-
-        // Flush cache after operation
-        if ($this->hasPivotChanges($result)) {
-            $this->flushCache('syncWithoutDetaching');
-        }
-
-        return $result;
-    }
-
-    /**
-     * Flush the model cache after a relationship operation.
+     * Flush the parent model's cache after a pivot operation.
      *
      * @param  string  $operation
      * @return void
@@ -163,30 +74,24 @@ class CachingBelongsToMany extends BelongsToMany
     protected function flushCache($operation)
     {
         $flush = function () use ($operation) {
-            if (method_exists($this->cacheableParent, 'flushModelCache')) {
-                $this->cacheableParent->flushModelCache();
-            } elseif (method_exists($this->cacheableParent, 'flushCache')) {
-                $this->cacheableParent->flushCache();
+            if (method_exists($this->parent, 'flushModelCache')) {
+                $this->parent->flushModelCache();
+            } elseif (method_exists($this->parent, 'flushCache')) {
+                $this->parent->flushCache();
             } else {
                 throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
             }
 
-            resolve(ModelCacheDebugger::class)->info("Cache flushed after {$operation} operation for model: " . get_class($this->cacheableParent));
+            resolve(ModelCacheDebugger::class)->info("Cache flushed after {$operation} operation for model: " . get_class($this->parent));
         };
 
-        // Defer flush until the transaction commits to avoid flushing on rollback
-        if (DB::transactionLevel() > 0) {
-            DB::afterCommit($flush);
+        $connection = $this->parent->getConnection();
+
+        // Defer flush until the model's connection commits to avoid flushing on rollback
+        if ($connection->transactionLevel() > 0) {
+            $connection->afterCommit($flush);
         } else {
             $flush();
         }
-    }
-
-    /**
-     * Determine whether a sync operation changed pivot rows.
-     */
-    protected function hasPivotChanges(array $result): bool
-    {
-        return ! empty($result['attached']) || ! empty($result['updated']) || ! empty($result['detached']);
     }
 }

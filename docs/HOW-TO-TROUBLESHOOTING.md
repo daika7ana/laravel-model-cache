@@ -11,6 +11,7 @@
 - Writes went through a path that bypasses the package: raw `DB` writes, or query-builder writes on a model without the trait.
 - The store doesn't support tags (file, database): writes log a warning and **skip the flush** instead of wiping unrelated application cache. Use Redis or Memcached for selective invalidation. (Reads still cache with any driver.)
 - Pivot changes on a model without `HasCachedRelationships`.
+- `withCount()` / `withSum()` / `withAvg()` / `withExists()` are compiled into the parent query's SQL (not eager loads). They are cached with the parent query, and a write to the related model still invalidates them because model cache invalidation resets the shared `model_cache` tag.
 
 ## Cache driver outages
 

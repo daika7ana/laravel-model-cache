@@ -36,9 +36,7 @@ class ClearModelCacheCommand extends Command
             return $this->clearModelCache($modelClass) ? CommandAlias::SUCCESS : CommandAlias::FAILURE;
         }
 
-        $this->clearAllModelCache();
-
-        return CommandAlias::SUCCESS;
+        return $this->clearAllModelCache() ? CommandAlias::SUCCESS : CommandAlias::FAILURE;
     }
 
     /**
@@ -75,16 +73,7 @@ class ClearModelCacheCommand extends Command
                 method_exists($modelClass, 'flushModelCache')
                 && (new ReflectionMethod($modelClass, 'flushModelCache'))->isStatic()
             ) {
-                $result = $modelClass::flushModelCache();
-                if ($result) {
-                    $this->components->info("Cache cleared successfully for model: {$modelClass}");
-                } else {
-                    $this->components->warn('Static method returned false - cache may not have been cleared completely');
-                    // Force a full cache clear as a backup
-                    $this->performFullCacheFlush();
-                }
-
-                return true;
+                return $this->reportFlushResult($modelClass, $modelClass::flushModelCache());
             }
 
             $this->components->info('No static methods found. Trying with instance methods...');
@@ -95,29 +84,18 @@ class ClearModelCacheCommand extends Command
             $this->components->info("Model table: {$tableName}");
 
             if (method_exists($model, 'flushCache')) {
-                $result = $model->flushCache();
-                if ($result) {
-                    $this->components->info("Cache cleared successfully for model: {$modelClass}");
-                } else {
-                    $this->components->warn('Instance method returned false - cache may not have been cleared completely');
-                    // Force a full cache clear as a backup
-                    $this->performFullCacheFlush();
-                }
-            } elseif (method_exists($model, 'flushModelCache')) {
-                // For backward compatibility with instance methods
-                $result = $model->flushModelCache();
-                if ($result) {
-                    $this->components->info("Cache cleared successfully for model: {$modelClass}");
-                } else {
-                    $this->components->warn('Instance method returned false - cache may not have been cleared completely');
-                    // Force a full cache clear as a backup
-                    $this->performFullCacheFlush();
-                }
-            } else {
-                $this->components->warn('No cache flush methods found on the model. Using manual clearing...');
-                $this->clearModelCacheManually($modelClass, $tableName);
+                return $this->reportFlushResult($modelClass, $model->flushCache());
             }
-        } catch (\Exception $e) {
+
+            if (method_exists($model, 'flushModelCache')) {
+                // For backward compatibility with instance methods
+                return $this->reportFlushResult($modelClass, $model->flushModelCache());
+            }
+
+            $this->components->warn('No cache flush methods found on the model. Using manual clearing...');
+
+            return $this->clearModelCacheManually($modelClass, $tableName);
+        } catch (\Throwable $e) {
             $this->components->error("Error clearing cache for {$modelClass}: " . $e->getMessage());
             $this->components->error('Stack trace: ' . $e->getTraceAsString());
 
@@ -126,9 +104,25 @@ class ClearModelCacheCommand extends Command
             if ($this->components->confirm('Would you like to clear the entire application cache?', false)) {
                 $this->performFullCacheFlush();
             }
+
+            return false;
+        }
+    }
+
+    /**
+     * Report the result of a model flush and signal success/failure to the shell.
+     */
+    protected function reportFlushResult(string $modelClass, $result): bool
+    {
+        if ($result) {
+            $this->components->info("Cache cleared successfully for model: {$modelClass}");
+
+            return true;
         }
 
-        return true;
+        $this->components->warn('Cache flush was skipped: the configured store does not support tags. Use Redis or Memcached for selective invalidation.');
+
+        return false;
     }
 
     /**
@@ -154,7 +148,7 @@ class ClearModelCacheCommand extends Command
             // Flush everything
             $cache->flush();
             $this->components->info('Full application cache has been cleared successfully');
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->components->error('Error performing full cache flush: ' . $e->getMessage());
         }
     }
@@ -162,7 +156,7 @@ class ClearModelCacheCommand extends Command
     /**
      * Clear cache manually when flushModelCache is not available.
      */
-    protected function clearModelCacheManually(string $modelClass, string $tableName): void
+    protected function clearModelCacheManually(string $modelClass, string $tableName): bool
     {
         try {
             $cache = $this->cacheRepository();
@@ -175,8 +169,8 @@ class ClearModelCacheCommand extends Command
                     $cache->tags($tags)->flush();
                     $this->components->info("Cache cleared for model: {$modelClass} using tags");
 
-                    return;
-                } catch (\Exception $e) {
+                    return true;
+                } catch (\Throwable $e) {
                     $this->components->warn('Error using cache tags: ' . $e->getMessage());
                 }
             }
@@ -186,19 +180,24 @@ class ClearModelCacheCommand extends Command
             if ($this->components->confirm("Your cache driver doesn't support tags or there was an error. Would you like to clear ALL application cache?", false)) {
                 $cache->flush();
                 $this->components->info('All cache cleared successfully');
-            } else {
-                $this->components->info('Cache clearing cancelled');
+
+                return true;
             }
 
-        } catch (\Exception $e) {
+            $this->components->info('Cache clearing cancelled');
+
+            return false;
+        } catch (\Throwable $e) {
             $this->components->error('Error clearing cache: ' . $e->getMessage());
+
+            return false;
         }
     }
 
     /**
      * Clear cache for all models.
      */
-    protected function clearAllModelCache(): void
+    protected function clearAllModelCache(): bool
     {
         try {
             $cache = $this->cacheRepository();
@@ -209,8 +208,8 @@ class ClearModelCacheCommand extends Command
                     $cache->tags('model_cache')->flush();
                     $this->components->success('Cache cleared for all models using tags');
 
-                    return;
-                } catch (\Exception $e) {
+                    return true;
+                } catch (\Throwable $e) {
                     $this->components->warn('Error using cache tags: ' . $e->getMessage());
                 }
             }
@@ -220,11 +219,17 @@ class ClearModelCacheCommand extends Command
             if ($this->components->confirm('Your cache driver doesn\'t support tags. This will clear ALL application cache. Continue?', false)) {
                 $cache->flush();
                 $this->components->success('All cache cleared successfully');
-            } else {
-                $this->components->info('Cache clearing cancelled');
+
+                return true;
             }
-        } catch (\Exception $e) {
+
+            $this->components->info('Cache clearing cancelled');
+
+            return false;
+        } catch (\Throwable $e) {
             $this->components->error('Error clearing cache: ' . $e->getMessage());
+
+            return false;
         }
     }
 
@@ -235,7 +240,7 @@ class ClearModelCacheCommand extends Command
     {
         try {
             return method_exists($cache, 'supportsTags') && $cache->supportsTags();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return false;
         }
     }

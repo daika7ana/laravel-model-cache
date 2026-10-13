@@ -142,4 +142,26 @@ class ConsoleCommandTest extends TestCase
 
         Mockery::close();
     }
+
+    #[Test]
+    public function it_does_not_wipe_the_cache_when_model_flush_returns_false()
+    {
+        // A store without tags makes Post::flushModelCache() return false.
+        config(['cache.default' => 'database']);
+        $this->ensureDatabaseCacheTables();
+
+        Cache::store('database')->put('unrelated_sentinel', 'keep', 60);
+
+        $this->artisan('mcache:flush', [
+            'model' => Post::class,
+        ])
+            ->expectsOutputToContain('does not support tags')
+            ->assertExitCode(1);
+
+        $this->assertSame(
+            'keep',
+            Cache::store('database')->get('unrelated_sentinel'),
+            'A model flush that returns false must not wipe the entire cache',
+        );
+    }
 }

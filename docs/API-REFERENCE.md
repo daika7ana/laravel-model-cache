@@ -6,13 +6,13 @@ Complete reference for the package's public surface. For setup, see [HOW-TO-INST
 
 With `HasCachedQueries` on a model, these calls read (and write) the cache:
 
-- `get()` — and everything built on it: `first()`, `find()`, `findOrFail()`, `firstOrFail()`, `chunk()`/`cursor()` iteration, `simplePaginate()`
+- `get()` — and everything built on it: `first()`, `find()`, `findOrFail()`, `firstOrFail()`, `chunk()` (per page), `simplePaginate()`
 - `count()`, `sum()`, `max()`, `min()`, `avg()` (and `average()`)
 - `paginate()` — cached as a single key (count + items together)
 
 Eager-loaded relationships are cached together with the parent query (`with('tags')` produces a distinct cache key). Global scopes are part of the query SQL and therefore of the key.
 
-Calls that never touch the cache: `withoutCache()` chains, `model-cache.enabled = false`, per-model `$cacheMinutes = 0`, and any cache failure (fail-open falls through to the database).
+Calls that never touch the cache: `withoutCache()` chains, `cursor()` (streams straight from the database, bypassing `get()`), `model-cache.enabled = false`, per-model `$cacheMinutes = 0`, and any cache failure (fail-open falls through to the database).
 
 ## Builder methods
 
@@ -64,6 +64,7 @@ On a model with `HasCachedRelationships`, these flush the model cache — gated 
 - `detach()` — flushes only when rows were actually detached
 - `sync()` / `syncWithoutDetaching()` — flushes only when pivot rows changed
 - `updateExistingPivot()` — flushes only when a row was updated
+- **Not covered:** `morphToMany()` / `morphedByMany()` return Laravel's plain `MorphToMany`, so their `attach()`/`detach()`/`sync()` do **not** auto-flush. Call `$model->flushCache()` after those, or model the pivot as a `belongsToMany`.
 
 ### Legacy helper methods (optional)
 
@@ -77,7 +78,7 @@ Equivalent one-liners on the model that call the relation and flush explicitly:
 
 ## Cache keys
 
-A key is `hash(prefix | table | sql | bindings | columns | locale? | with:{eager-load names} | paginate components)`, using `config('model-cache.hash_algorithm')` (default `xxh128`; invalid algorithms are rejected at boot).
+A key is a hash (via `config('model-cache.hash_algorithm')`, default `xxh128`; invalid algorithms are rejected at boot) over the serialized components: prefix, model class, connection name, database name, table, SQL, bindings, columns, locale (optional), and a fingerprint of each `with()` eager-load constraint. Eager-load fingerprints use the constraint's code location and captured values; a constraint capturing non-serializable state is instead resolved against a fresh relation and fingerprinted by the resulting relation state.
 
 A different value in any component — e.g. a different column list, eager load, locale (when `include_locale_in_key` is on), page/per-page, or a non-null `$total` — yields a different key, so related queries are cached separately and safely.
 
@@ -86,9 +87,10 @@ A different value in any component — e.g. a different column list, eager load,
 - **Model events** — `created`, `updated`, `deleted`, `restored` flush the model's cache.
 - **Mass operations** — `update`, `delete`, `insert`, `insertGetId`, `insertOrIgnore`, `updateOrInsert`, `upsert`, `truncate`, `increment`, `decrement`, `forceDelete`, `restore`, `touch` flush via the builder.
 - **Single flush per operation** — instance operations (e.g. `$post->delete()`) flush once even though both the builder and the model event fire (identity-based markers).
-- **Transactions** — every flush is deferred with `DB::afterCommit()` inside a transaction; a rollback never flushes.
-- **Non-tag stores** — `flushModelCache()` skips the flush, logs a warning, and returns `false` rather than wiping unrelated application cache. Use Redis/Memcached for selective invalidation.
-- **Manual** — `Post::flushModelCache()`, `$post->flushCache()`, or `php artisan mcache:flush`.
+- **Transactions** — every flush is deferred on the model's own connection (`$model->getConnection()->afterCommit()`) until the transaction commits; a rollback never flushes. In multi-connection apps, Laravel attaches the callback to the most recent pending transaction, so defer reads/writes until all transactions have closed.
+- **Non-tag stores** — `flushModelCache()` skips the flush, logs a warning, and returns `false` rather than wiping unrelated application cache. Use Redis/Memcached for tag-based invalidation.
+- **Flush scope** — every cached model query carries the shared `model_cache` tag, and a tagged flush resets every tag in the set, so flushing one model currently invalidates all cached model queries.
+- **Manual** — `Post::flushModelCache()`, `$post->flushCache()`, or `php artisan mcache:flush`. Inside a transaction these return `true` as soon as the flush is scheduled rather than executed.
 
 ## Stampede prevention
 
@@ -99,4 +101,5 @@ When `model-cache.use_cache_locks` (env `MODEL_CACHE_USE_LOCKS`) is enabled, a c
 `php artisan mcache:flush [ModelClass]`
 
 - No argument — flushes the `model_cache` tag for all models (or asks to flush the entire cache on non-tag stores; confirmation defaults to **No**).
-- With a model class — validates it (`class_exists`, `is_a(..., Model::class)`); invalid input prints an error and exits with code **1**, success exits **0**.
+- With a model class — validates it (`class_exists`, `is_a(..., Model::class)`); invalid input prints an error and exits with code **1**.
+- Exit code **1** also signals a flush that was skipped (non-tag store), declined, or failed; **0** means a flush actually ran.

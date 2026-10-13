@@ -2,10 +2,8 @@
 
 namespace YMigVal\LaravelModelCache;
 
-use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
-use Illuminate\Support\Facades\DB;
 use YMigVal\LaravelModelCache\Contracts\CacheableBuilderContract;
 
 /**
@@ -84,9 +82,12 @@ trait HasCachedQueries
                     $debugger->info("Cache flushed after `{$event}` for model: " . get_class($model));
                 };
 
-                // Defer flush until transaction commits to avoid flushing on rollback
-                if (DB::transactionLevel() > 0) {
-                    DB::afterCommit($flush);
+                // Defer flush until this model's own connection commits, so a
+                // rollback (or a transaction on another connection) never flushes.
+                $connection = $model->getConnection();
+
+                if ($connection->transactionLevel() > 0) {
+                    $connection->afterCommit($flush);
                 } else {
                     $flush();
                 }
@@ -141,6 +142,15 @@ trait HasCachedQueries
      */
     public static function flushModelCache()
     {
+        $connection = (new static())->getConnection();
+
+        // Defer until the model's connection commits so a rollback never invalidates cache.
+        if ($connection->transactionLevel() > 0) {
+            $connection->afterCommit(fn() => static::flushModelCache());
+
+            return true;
+        }
+
         $debugger = resolve(ModelCacheDebugger::class);
 
         try {
@@ -227,30 +237,5 @@ trait HasCachedQueries
 
             return \Illuminate\Support\Facades\Cache::store(config('cache.default'));
         }
-    }
-
-    /**
-     * Determine if cache driver supports tags.
-     *
-     * @param  \Illuminate\Contracts\Cache\Repository  $cache
-     * @return bool
-     */
-    protected function supportsTags($cache)
-    {
-        try {
-            return method_exists($cache, 'supportsTags') && $cache->supportsTags();
-        } catch (\Exception $e) {
-            return false;
-        }
-    }
-
-    /**
-     * Get the cache driver to use.
-     *
-     * @return Repository
-     */
-    protected function getCacheDriver()
-    {
-        return self::getStaticCacheDriver();
     }
 }

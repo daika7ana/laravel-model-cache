@@ -47,7 +47,7 @@ class ModelCacheServiceProvider extends ServiceProvider
      */
     protected function validateConfiguration(): void
     {
-        $algorithm = config('model-cache.hash_algorithm', 'xxh128');
+        $algorithm = strtolower((string) config('model-cache.hash_algorithm', 'xxh128'));
 
         if (! in_array($algorithm, hash_algos(), true)) {
             throw new \InvalidArgumentException(

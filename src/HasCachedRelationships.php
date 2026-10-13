@@ -2,75 +2,17 @@
 
 namespace YMigVal\LaravelModelCache;
 
-use Illuminate\Support\Facades\DB;
-
 /**
  * Helper trait to flush cache when relationship methods are called.
  *
- * This trait can be used alongside HasCachedQueries to ensure that
- * operations on model relationships also flush the cache appropriately.
- *
- * @method newRelatedInstance(string $related)
- * @method getForeignKey()
- * @method joiningTable(string $related)
- * @method getKeyName()
+ * Add it alongside HasCachedQueries: every belongsToMany() relation is then a
+ * CachingBelongsToMany, which flushes the parent's cache after attach/detach/
+ * sync. The *AndFlushCache() helpers below are legacy sugar for the same thing.
  */
 trait HasCachedRelationships
 {
     /**
-     * Override the belongsToMany relationship method to return a custom
-     * relationship class that handles cache flushing after operations.
-     *
-     * @param  string  $related
-     * @param  string|null  $table
-     * @param  string|null  $foreignPivotKey
-     * @param  string|null  $relatedPivotKey
-     * @param  string|null  $parentKey
-     * @param  string|null  $relatedKey
-     * @param  string|null  $relation
-     * @return \YMigVal\LaravelModelCache\CachingBelongsToMany
-     */
-    public function belongsToMany(
-        $related,
-        $table = null,
-        $foreignPivotKey = null,
-        $relatedPivotKey = null,
-        $parentKey = null,
-        $relatedKey = null,
-        $relation = null,
-    ) {
-        // Get the original relationship instance
-        $instance = $this->newRelatedInstance($related);
-
-        $foreignPivotKey = $foreignPivotKey ?: $this->getForeignKey();
-        $relatedPivotKey = $relatedPivotKey ?: $instance->getForeignKey();
-
-        // Determine the relationship name if not provided
-        if (is_null($relation)) {
-            $relation = $this->guessBelongsToManyRelation();
-        }
-
-        // Generate table name if not provided
-        if (is_null($table)) {
-            $table = $this->joiningTable($related);
-        }
-
-        // Create our caching BelongsToMany relationship
-        return new CachingBelongsToMany(
-            $instance->newQuery(),
-            $this,
-            $table,
-            $foreignPivotKey,
-            $relatedPivotKey,
-            $parentKey ?: $this->getKeyName(),
-            $relatedKey ?: $instance->getKeyName(),
-            $relation,
-            $this,
-        );
-    }
-
-    /**
-     * Override the belongsToMany relation's sync method to flush cache.
+     * Sync a belongsToMany relation and flush the parent's cache (via the relation).
      *
      * @param  string  $relation
      * @param  bool  $detaching
@@ -82,19 +24,11 @@ trait HasCachedRelationships
             throw new \BadMethodCallException("Method {$relation} does not exist.");
         }
 
-        $result = $this->$relation()->sync($ids, $detaching);
-
-        $changes = count($result['attached'] ?? []) + count($result['updated'] ?? []) + count($result['detached'] ?? []);
-
-        if ($changes > 0) {
-            $this->flushRelationshipCache('sync');
-        }
-
-        return $result;
+        return $this->$relation()->sync($ids, $detaching);
     }
 
     /**
-     * Override the belongsToMany relation's attach method to flush cache.
+     * Attach to a belongsToMany relation and flush the parent's cache (via the relation).
      *
      * @param  string  $relation
      * @param  mixed  $ids
@@ -112,12 +46,10 @@ trait HasCachedRelationships
         }
 
         $this->$relation()->attach($ids, $attributes, $touch);
-
-        $this->flushRelationshipCache('attach');
     }
 
     /**
-     * Override the belongsToMany relation's detach method to flush cache.
+     * Detach from a belongsToMany relation and flush the parent's cache (via the relation).
      *
      * @param  string  $relation
      * @param  mixed  $ids
@@ -130,37 +62,45 @@ trait HasCachedRelationships
             throw new \BadMethodCallException("Method {$relation} does not exist.");
         }
 
-        $result = $this->$relation()->detach($ids, $touch);
-
-        if ($result > 0) {
-            $this->flushRelationshipCache('detach');
-        }
-
-        return $result;
+        return $this->$relation()->detach($ids, $touch);
     }
 
     /**
-     * Flush relationship cache and emit debug log.
+     * Override the belongsToMany factory so every many-to-many relation is a
+     * CachingBelongsToMany that flushes the cache after attach/detach/sync.
+     *
+     * The framework's belongsToMany() keeps its own logic (joiningTable with the
+     * related instance, relation-name guessing, …) and calls this factory.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     * @param  \Illuminate\Database\Eloquent\Model  $parent
+     * @param  string  $table
+     * @param  string  $foreignPivotKey
+     * @param  string  $relatedPivotKey
+     * @param  string  $parentKey
+     * @param  string  $relatedKey
+     * @param  string|null  $relationName
+     * @return \YMigVal\LaravelModelCache\CachingBelongsToMany
      */
-    protected function flushRelationshipCache(string $operation): void
-    {
-        $flush = function () use ($operation) {
-            if (method_exists($this, 'flushModelCache')) {
-                $this->flushModelCache();
-            } elseif (method_exists($this, 'flushCache')) {
-                $this->flushCache();
-            } else {
-                throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
-            }
-
-            resolve(ModelCacheDebugger::class)->info("Cache flushed after {$operation} operation for model: " . get_class($this));
-        };
-
-        // Defer flush until the transaction commits to avoid flushing on rollback
-        if (DB::transactionLevel() > 0) {
-            DB::afterCommit($flush);
-        } else {
-            $flush();
-        }
+    protected function newBelongsToMany(
+        $query,
+        $parent,
+        $table,
+        $foreignPivotKey,
+        $relatedPivotKey,
+        $parentKey,
+        $relatedKey,
+        $relationName = null,
+    ) {
+        return new CachingBelongsToMany(
+            $query,
+            $parent,
+            $table,
+            $foreignPivotKey,
+            $relatedPivotKey,
+            $parentKey,
+            $relatedKey,
+            $relationName,
+        );
     }
 }
