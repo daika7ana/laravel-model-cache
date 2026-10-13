@@ -140,17 +140,52 @@ trait HasCachedQueries
      *
      * @return bool
      */
-    public static function flushModelCache()
+    public static function flushModelCache(): bool
     {
         $connection = (new static())->getConnection();
 
         // Defer until the model's connection commits so a rollback never invalidates cache.
+        // The deferred callback must flush directly: the testing transactions manager
+        // runs afterCommit() callbacks immediately while its wrapping transaction is
+        // still open, so re-entering flushModelCache() here would recurse forever.
         if ($connection->transactionLevel() > 0) {
-            $connection->afterCommit(fn() => static::flushModelCache());
+            $connection->afterCommit(static fn() => static::performModelCacheFlush());
 
             return true;
         }
 
+        return static::performModelCacheFlush();
+    }
+
+    /**
+     * Allow flushing specific query cache when used directly in a query chain.
+     * This method is intended to be used as:
+     * Model::where('condition', $value)->flushCache();
+     *
+     * @return bool
+     */
+    public function scopeFlushCache(CacheableBuilderContract $query)
+    {
+        return $query->flushQueryCache();
+    }
+
+    /**
+     * Flush the cache for this model.
+     *
+     * @return bool
+     */
+    public function flushCache()
+    {
+        return self::flushModelCache();
+    }
+
+    /**
+     * Flush the cache for this model on its current connection.
+     *
+     * @return bool
+     */
+    protected static function performModelCacheFlush(): bool
+    {
         $debugger = resolve(ModelCacheDebugger::class);
 
         try {
@@ -190,28 +225,6 @@ trait HasCachedQueries
 
             return false;
         }
-    }
-
-    /**
-     * Allow flushing specific query cache when used directly in a query chain.
-     * This method is intended to be used as:
-     * Model::where('condition', $value)->flushCache();
-     *
-     * @return bool
-     */
-    public function scopeFlushCache(CacheableBuilderContract $query)
-    {
-        return $query->flushQueryCache();
-    }
-
-    /**
-     * Flush the cache for this model.
-     *
-     * @return bool
-     */
-    public function flushCache()
-    {
-        return self::flushModelCache();
     }
 
     /**

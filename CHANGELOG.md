@@ -2,6 +2,11 @@
 
 All notable changes to `laravel-model-cache` will be documented in this file.
 
+## [1.0.1] - 2026-10-13
+
+### Fixed
+- Infinite recursion and unbounded memory use when a cache flush ran inside a transaction. The `afterCommit()` deferrals in `flushModelCache()` and `flushQueryCache()` re-registered themselves as the callback; under Laravel's testing transactions manager (which runs callbacks immediately while the wrapping transaction is still open) this recursed forever. Deferred callbacks now perform the flush directly.
+
 ## [1.0.0] - 2026-10-13
 
 ### Added

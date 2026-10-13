@@ -240,52 +240,16 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
         $connection = $this->model->getConnection();
 
         // Defer until the transaction commits so a rollback never invalidates cache.
+        // The deferred callback must flush directly: the testing transactions manager
+        // runs afterCommit() callbacks immediately while its wrapping transaction is
+        // still open, so re-entering flushQueryCache() here would recurse forever.
         if ($connection->transactionLevel() > 0) {
-            $connection->afterCommit(fn() => $this->flushQueryCache($columns));
+            $connection->afterCommit(fn() => $this->performQueryCacheFlush($columns));
 
             return true;
         }
 
-        try {
-            $cacheKey = $this->getCacheKey($columns);
-            $cache = $this->getCacheDriver();
-            $cacheTags = $this->getCacheTags();
-            $tagged = $cacheTags && $this->supportsTags($cache);
-
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->info("Flushing specific query cache: {$cacheKey}");
-            }
-
-            // Tagged stores scope the entry under the tag namespace, so the
-            // specific-key forget must use the same tag set it was written with.
-            $result = $tagged
-                ? $cache->tags($cacheTags)->forget($cacheKey)
-                : $cache->forget($cacheKey);
-
-            if ($result && config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->debug("Successfully removed specific cache key: {$cacheKey}");
-            }
-
-            if ($tagged) {
-                try {
-                    $cache->tags($cacheTags)->flush();
-                    $result = true;
-                    if (config('model-cache.debug_mode', false)) {
-                        resolve(ModelCacheDebugger::class)->debug('Successfully flushed cache using tags for model: ' . get_class($this->model));
-                    }
-                } catch (\Throwable $e) {
-                    if (config('model-cache.debug_mode', false)) {
-                        resolve(ModelCacheDebugger::class)->debug("Could not flush by tags: {$e->getMessage()}");
-                    }
-                }
-            }
-
-            return $result;
-        } catch (\Throwable $e) {
-            resolve(ModelCacheDebugger::class)->error("Error flushing query cache: {$e->getMessage()}");
-
-            return false;
-        }
+        return $this->performQueryCacheFlush($columns);
     }
 
     /**
@@ -755,6 +719,56 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
         }
 
         return $result;
+    }
+
+    /**
+     * Forget this query's specific cache key and flush its tags.
+     *
+     * @param  array  $columns
+     * @return bool
+     */
+    protected function performQueryCacheFlush($columns = ['*']): bool
+    {
+        try {
+            $cacheKey = $this->getCacheKey($columns);
+            $cache = $this->getCacheDriver();
+            $cacheTags = $this->getCacheTags();
+            $tagged = $cacheTags && $this->supportsTags($cache);
+
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->info("Flushing specific query cache: {$cacheKey}");
+            }
+
+            // Tagged stores scope the entry under the tag namespace, so the
+            // specific-key forget must use the same tag set it was written with.
+            $result = $tagged
+                ? $cache->tags($cacheTags)->forget($cacheKey)
+                : $cache->forget($cacheKey);
+
+            if ($result && config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->debug("Successfully removed specific cache key: {$cacheKey}");
+            }
+
+            if ($tagged) {
+                try {
+                    $cache->tags($cacheTags)->flush();
+                    $result = true;
+                    if (config('model-cache.debug_mode', false)) {
+                        resolve(ModelCacheDebugger::class)->debug('Successfully flushed cache using tags for model: ' . get_class($this->model));
+                    }
+                } catch (\Throwable $e) {
+                    if (config('model-cache.debug_mode', false)) {
+                        resolve(ModelCacheDebugger::class)->debug("Could not flush by tags: {$e->getMessage()}");
+                    }
+                }
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            resolve(ModelCacheDebugger::class)->error("Error flushing query cache: {$e->getMessage()}");
+
+            return false;
+        }
     }
 
     /**
