@@ -11,7 +11,9 @@
 - Writes went through a path that bypasses the package: raw `DB` writes, or query-builder writes on a model without the trait.
 - The store doesn't support tags (file, database): writes log a warning and **skip the flush** instead of wiping unrelated application cache. Use Redis or Memcached for selective invalidation. (Reads still cache with any driver.)
 - Pivot changes on a model without `HasCachedRelationships`.
-- `withCount()` / `withSum()` / `withAvg()` / `withExists()` are compiled into the parent query's SQL (not eager loads). They are cached with the parent query, and a write to the related model still invalidates them because model cache invalidation resets the shared `model_cache` tag.
+- `withCount()` / `withSum()` / `withAvg()` / `withExists()` are compiled into the parent query's SQL (not eager loads). The package records the relation tables when the aggregate is added, so a write to the related model invalidates the parent query through those dependency tags.
+- A query using an opaque subquery source (`fromSub()`, `joinSub()`, `selectSub()` with a closure/raw SQL) deliberately bypasses the cache because its dependencies cannot be tagged safely. `morphTo` eager loads are supported when every morph type is registered in `Relation::morphMap()`: they are keyed and tagged per mapped target, including each target's global scopes. Without a morph map, `morphTo` eager-load queries bypass the cache. A result containing an unmapped morph type is returned but not cached.
+- A query with an `afterQuery()` callback bypasses the cache because the callback mutates the result after the query runs.
 
 ## Cache driver outages
 

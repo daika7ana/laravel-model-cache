@@ -12,6 +12,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 class CachingBelongsToMany extends BelongsToMany
 {
     /**
+     * True while a batched sync() performs its per-id writes.
+     */
+    protected $flushSuppressed = false;
+
+    /**
      * Attach a model to the parent.
      *
      * @param  mixed  $id
@@ -26,7 +31,9 @@ class CachingBelongsToMany extends BelongsToMany
 
         parent::attach($id, $attributes, $touch);
 
-        $this->flushCache('attach');
+        if (! $this->flushSuppressed) {
+            $this->flushCache('attach');
+        }
     }
 
     /**
@@ -40,7 +47,7 @@ class CachingBelongsToMany extends BelongsToMany
     {
         $result = parent::detach($ids, $touch);
 
-        if ($result) {
+        if ($result && ! $this->flushSuppressed) {
             $this->flushCache('detach');
         }
 
@@ -58,11 +65,35 @@ class CachingBelongsToMany extends BelongsToMany
     {
         $result = parent::updateExistingPivot($id, $attributes, $touch);
 
-        if ($result) {
+        if ($result && ! $this->flushSuppressed) {
             $this->flushCache('updateExistingPivot');
         }
 
         return $result;
+    }
+
+    /**
+     * Sync the intermediate tables with a list of IDs or collection of models.
+     *
+     * @param  mixed  $ids
+     * @param  bool  $detaching
+     * @return array
+     */
+    public function sync($ids, $detaching = true)
+    {
+        $this->flushSuppressed = true;
+
+        try {
+            $changes = parent::sync($ids, $detaching);
+        } finally {
+            $this->flushSuppressed = false;
+        }
+
+        if ($changes['attached'] || $changes['detached'] || $changes['updated']) {
+            $this->flushCache('sync');
+        }
+
+        return $changes;
     }
 
     /**
@@ -82,6 +113,16 @@ class CachingBelongsToMany extends BelongsToMany
                 throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
             }
 
+            // A pivot write changes results cached from both sides of the
+            // relation, not just the parent's.
+            $related = $this->getRelated();
+
+            if ($related !== $this->parent && method_exists($related, 'flushModelCache')) {
+                $related->flushModelCache();
+            }
+
+            $this->flushPivotTag();
+
             resolve(ModelCacheDebugger::class)->info("Cache flushed after {$operation} operation for model: " . get_class($this->parent));
         };
 
@@ -92,6 +133,23 @@ class CachingBelongsToMany extends BelongsToMany
             $connection->afterCommit($flush);
         } else {
             $flush();
+        }
+    }
+
+    /**
+     * Reset the pivot table's tag so cached eager loads and relation queries on
+     * either side see the changed pivot rows.
+     */
+    protected function flushPivotTag(): void
+    {
+        try {
+            $cache = \Illuminate\Support\Facades\Cache::store(config('model-cache.cache_store') ?: null);
+
+            if (method_exists($cache, 'supportsTags') && $cache->supportsTags()) {
+                $cache->tags([$this->getTable()])->flush();
+            }
+        } catch (\Throwable $e) {
+            resolve(ModelCacheDebugger::class)->warning('Could not flush pivot cache tag: ' . $e->getMessage());
         }
     }
 }

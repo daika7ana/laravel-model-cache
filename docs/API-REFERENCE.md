@@ -44,7 +44,7 @@ All methods below are available on query chains (`Post::where(...)->method()`). 
 
 | Property | Default | Effect |
 |----------|---------|--------|
-| `$cacheMinutes` | `null` → `config('model-cache.cache_duration')` | TTL in minutes. `0` disables caching for this model. |
+| `$cacheMinutes` | `null` → `config('model-cache.cache_duration')` | TTL in minutes. `0` disables caching for this model. When a model is eager-loaded or included through `withCount()`/`withSum()`/`withAvg()`/`withMin()`/`withMax()`/`withExists()`, its TTL also caps the root query's entry (the shortest positive TTL wins), and `0` on the related model disables caching for the root snapshot. |
 | `$cachePrefix` | `null` → `config('model-cache.cache_key_prefix')` | Cache key prefix. |
 | `$cacheLockSeconds` | `null` → `config('model-cache.cache_lock_seconds')` | Stampede lock duration (seconds). |
 
@@ -78,7 +78,11 @@ Equivalent one-liners on the model that call the relation and flush explicitly:
 
 ## Cache keys
 
-A key is a hash (via `config('model-cache.hash_algorithm')`, default `xxh128`; invalid algorithms are rejected at boot) over the serialized components: prefix, model class, connection name, database name, table, SQL, bindings, columns, locale (optional), and a fingerprint of each `with()` eager-load constraint. Eager-load fingerprints use the constraint's code location and captured values; a constraint capturing non-serializable state is instead resolved against a fresh relation and fingerprinted by the resulting relation state.
+A key is a hash (via `config('model-cache.hash_algorithm')`, default `xxh128`; invalid algorithms are rejected at boot) over the serialized components: prefix, model class, connection name, database name, table, SQL, bindings, columns, locale (optional), and the resolved state of every eager load. Eager loads are always resolved against a fresh relation so their query SQL/bindings, global scopes, `$with`, pivot settings, `as()`/`using()`, and nested relations are part of the key. Constraint closures run on every key and tag computation, including cache hits; keep them side-effect free and do not run database queries inside them. A `morphTo` eager load includes the resolved query state of every type registered in `Relation::morphMap()`, so scoped polymorphic targets cannot share a key across tenants. Without a morph map the possible target set cannot be enumerated safely, so `morphTo` eager-load queries bypass the cache; register every morph type in the map to enable caching. A result containing an unmapped type is returned to the caller but is not written to the cache.
+
+Bindings and columns are fingerprinted losslessly with PHP's `serialize()`: binary strings, binding types and objects are preserved exactly, and `Expression` objects use their raw SQL. Scalar bindings are serialized as one array, which keeps large `whereIn()` key builds fast. If a value cannot be serialized safely (a resource, a closure, or an opaque subquery source), the query bypasses the cache instead of risking a collision.
+
+Queries with base-query `afterQuery()` callbacks (including relation callbacks used by `chaperone()`) bypass the cache, because those callbacks mutate the result after the query runs.
 
 A different value in any component — e.g. a different column list, eager load, locale (when `include_locale_in_key` is on), page/per-page, or a non-null `$total` — yields a different key, so related queries are cached separately and safely.
 
@@ -89,7 +93,8 @@ A different value in any component — e.g. a different column list, eager load,
 - **Single flush per operation** — instance operations (e.g. `$post->delete()`) flush once even though both the builder and the model event fire (identity-based markers).
 - **Transactions** — every flush is deferred on the model's own connection (`$model->getConnection()->afterCommit()`) until the transaction commits; a rollback never flushes. In multi-connection apps, Laravel attaches the callback to the most recent pending transaction, so defer reads/writes until all transactions have closed.
 - **Non-tag stores** — `flushModelCache()` skips the flush, logs a warning, and returns `false` rather than wiping unrelated application cache. Use Redis/Memcached for tag-based invalidation.
-- **Flush scope** — every cached model query carries the shared `model_cache` tag, and a tagged flush resets every tag in the set, so flushing one model currently invalidates all cached model queries.
+- **Flush scope** — every cached query stores the shared `model_cache` tag plus its root model/table and any dependency tags it reads (eager-loaded relations, pivot/through tables, joins, `whereHas`/`whereIn` subqueries, unions, and `withCount`/`withSum` relations). A per-model flush resets only that model's class/table tags, so writing one model does not evict unrelated models. `php artisan mcache:flush` with no argument still flushes the shared `model_cache` tag and clears every cached model query.
+- **Dependency limits** — `morphTo` eager loads are keyed and tagged per mapped morph type (via `Relation::morphMap()`); without a morph map they bypass the cache, and every morph type must be registered in the map. Building a `morphTo` key queries the resolved state of every registered morph type, so a large morph map adds CPU work to every read, including cache hits. Opaque subquery sources (`fromSub()`, `joinSub()`, `selectSub()` closures/raw SQL) still cannot be tagged safely; queries using them bypass the cache instead of returning stale data. The same applies to raw SQL subqueries in `selectRaw`/`addSelect`, `whereRaw`, and `orderByRaw`. `morphToMany()` / `morphedByMany()` are still not auto-flushed; call `flushCache()` after those pivot writes.
 - **Manual** — `Post::flushModelCache()`, `$post->flushCache()`, or `php artisan mcache:flush`. Inside a transaction these return `true` as soon as the flush is scheduled rather than executed.
 
 ## Stampede prevention

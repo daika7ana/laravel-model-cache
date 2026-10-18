@@ -195,9 +195,10 @@ trait HasCachedQueries
             // Get the cache driver directly
             $cache = self::getStaticCacheDriver();
 
-            // Set tags for this model
+            // Reset only this model's tags. Including the shared 'model_cache'
+            // tag would reset every model's namespace (TagSet::reset() bumps
+            // each tag), defeating selective invalidation.
             $tags = [
-                'model_cache',
                 $modelClass,
                 $tableName,
             ];

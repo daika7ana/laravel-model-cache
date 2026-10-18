@@ -161,7 +161,9 @@ class ClearModelCacheCommand extends Command
         try {
             $cache = $this->cacheRepository();
 
-            $tags = ['model_cache', $modelClass, $tableName];
+            // Per-model flush must not include the shared 'model_cache' tag:
+            // resetting it would invalidate every cached model.
+            $tags = [$modelClass, $tableName];
 
             // First try to use tags if supported
             if ($this->supportsTags($cache)) {

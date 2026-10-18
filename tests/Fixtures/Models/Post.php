@@ -3,6 +3,7 @@
 namespace Daika7ana\LaravelModelCache\Tests\Fixtures\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Daika7ana\LaravelModelCache\HasCachedQueries;
 
@@ -23,6 +24,14 @@ class Post extends Model
         'published' => 'boolean',
         'views' => 'integer',
     ];
+
+    /**
+     * Define a one-to-many relationship with comments.
+     */
+    public function comments(): HasMany
+    {
+        return $this->hasMany(Comment::class, 'post_id');
+    }
 
     /**
      * Define a many-to-many relationship with tags.
