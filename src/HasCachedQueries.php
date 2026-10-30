@@ -78,7 +78,7 @@ trait HasCachedQueries
                         return;
                     }
 
-                    static::flushModelCache();
+                    static::flushModelCache($event);
                     $debugger->info("Cache flushed after `{$event}` for model: " . get_class($model));
                 };
 
@@ -140,7 +140,7 @@ trait HasCachedQueries
      *
      * @return bool
      */
-    public static function flushModelCache(): bool
+    public static function flushModelCache(?string $operation = null): bool
     {
         $connection = (new static())->getConnection();
 
@@ -149,12 +149,12 @@ trait HasCachedQueries
         // runs afterCommit() callbacks immediately while its wrapping transaction is
         // still open, so re-entering flushModelCache() here would recurse forever.
         if ($connection->transactionLevel() > 0) {
-            $connection->afterCommit(static fn() => static::performModelCacheFlush());
+            $connection->afterCommit(static fn() => static::performModelCacheFlush($operation));
 
             return true;
         }
 
-        return static::performModelCacheFlush();
+        return static::performModelCacheFlush($operation);
     }
 
     /**
@@ -184,7 +184,7 @@ trait HasCachedQueries
      *
      * @return bool
      */
-    protected static function performModelCacheFlush(): bool
+    protected static function performModelCacheFlush(?string $operation = null): bool
     {
         $debugger = resolve(ModelCacheDebugger::class);
 
@@ -195,12 +195,19 @@ trait HasCachedQueries
             // Get the cache driver directly
             $cache = self::getStaticCacheDriver();
 
-            // Set tags for this model
+            // Reset only this model's tags. Including the shared 'model_cache'
+            // tag would reset every model's namespace (TagSet::reset() bumps
+            // each tag), defeating selective invalidation.
             $tags = [
-                'model_cache',
                 $modelClass,
                 $tableName,
             ];
+
+            // A delete can cascade to rows of other models without firing their
+            // events, so destructive writes must also reset the shared tag.
+            if (in_array($operation, ['delete', 'forceDelete', 'truncate', 'deleted'], true)) {
+                $tags[] = 'model_cache';
+            }
 
             // Try with tags if supported
             if (method_exists($cache, 'supportsTags') && $cache->supportsTags()) {

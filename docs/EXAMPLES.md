@@ -35,8 +35,8 @@ $post->tags()->detach([1]);     // flushes Post cache
 // Eager-loaded queries are cached together with the parent:
 $posts = Post::with('tags')->where('published', true)->get(); // cached as one entry
 
-// Note: pivot changes flush the parent (Post). The related model's
-// own cached queries (e.g. Tag::all()) are not flushed by them.
+// Pivot changes flush the parent, the related model, and the pivot
+// table's tag, so cached queries on either side see the change.
 ```
 
 ## Pagination with a custom total
