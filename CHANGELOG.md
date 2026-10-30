@@ -2,7 +2,7 @@
 
 All notable changes to `laravel-model-cache` will be documented in this file.
 
-## [Unreleased]
+## [1.1.0] - 2026-10-30
 
 ### Added
 - `morphTo` eager loads are keyed and tagged per type registered in `Relation::morphMap()`; results containing an unmapped type are returned but not cached. Without a morph map, `morphTo` eager loads bypass the cache.
