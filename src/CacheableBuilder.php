@@ -192,11 +192,7 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
         $cacheTags = $this->getCacheTags();
         $minutes = $this->effectiveCacheMinutes();
 
-        if ($this->shouldBypassCache() || $minutes === 0) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->debug('Query state could not be fingerprinted or resolved safely; bypassing cache.');
-            }
-
+        if ($this->shouldBypassCache($minutes)) {
             return $this->getWithoutCache($columns);
         }
 
@@ -452,11 +448,7 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
         $cacheTags = $this->getCacheTags();
         $minutes = $this->effectiveCacheMinutes();
 
-        if ($this->shouldBypassCache() || $minutes === 0) {
-            if (config('model-cache.debug_mode', false)) {
-                resolve(ModelCacheDebugger::class)->debug('Query state could not be fingerprinted or resolved safely; bypassing cache.');
-            }
-
+        if ($this->shouldBypassCache($minutes)) {
             return parent::paginate($perPage, $columns, $pageName, $page, $total);
         }
 
@@ -505,6 +497,12 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
             }
 
             $this->recordAggregateDependencies(preg_split('/\s+as\s+/i', $name)[0]);
+
+            // withExists() compiles the constraint into an opaque exists(...)
+            // selectRaw string, so any extra table it reads cannot be tagged.
+            if ($function === 'exists' && $value instanceof \Closure) {
+                $this->queryDependencyUncertain = true;
+            }
         }
 
         $before = $this->expressionColumns();
@@ -1099,7 +1097,7 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
         $cacheTags = $this->getCacheTags();
         $minutes = $this->effectiveCacheMinutes();
 
-        if ($this->shouldBypassCache() || $minutes === 0) {
+        if ($this->shouldBypassCache($minutes)) {
             return parent::{$method}($column);
         }
 
@@ -1144,7 +1142,7 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
                 resolve(ModelCacheDebugger::class)->info("Flushing cache after `{$operation}` operation for model: " . get_class($this->model));
             }
 
-            $this->flushModelOrQueryCache();
+            $this->flushModelOrQueryCache($operation);
         }
 
         return $result;
@@ -1153,11 +1151,11 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
     /**
      * Flush model cache when available, otherwise flush query cache.
      */
-    protected function flushModelOrQueryCache(): void
+    protected function flushModelOrQueryCache(?string $operation = null): void
     {
-        $flush = function () {
+        $flush = function () use ($operation) {
             if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache();
+                $this->model->flushModelCache($operation);
 
                 // Instance operations (delete/forceDelete) run through this builder first
                 // and then fire the `deleted` event; mark the instance so the event handler
@@ -1308,13 +1306,23 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
     }
 
     /**
-     * Whether this query's result must not be cached.
+     * Whether this query's result must not be cached. A zero TTL for this
+     * query or an eager-loaded dependency also bypasses the cache.
      */
-    protected function shouldBypassCache(): bool
+    protected function shouldBypassCache(?int $minutes = null): bool
     {
-        return $this->eagerLoadUnfingerprintable
-            || $this->queryDependencyUncertain
-            || $this->cacheKeyUnfingerprintable;
+        if ($minutes !== 0
+            && ! $this->eagerLoadUnfingerprintable
+            && ! $this->queryDependencyUncertain
+            && ! $this->cacheKeyUnfingerprintable) {
+            return false;
+        }
+
+        if (config('model-cache.debug_mode', false)) {
+            resolve(ModelCacheDebugger::class)->debug('Bypassing cache for this query.');
+        }
+
+        return true;
     }
 
     /**
@@ -1355,11 +1363,8 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
         $minutes = (int) ($this->cacheMinutes ?: config('model-cache.cache_duration', 60));
 
         foreach ($this->eagerDependencyModels as $model) {
-            $relatedMinutes = $this->modelCacheMinutes($model);
-
-            if ($relatedMinutes === null) {
-                $relatedMinutes = (int) config('model-cache.cache_duration', 60);
-            }
+            $relatedMinutes = $this->modelCacheMinutes($model)
+                ?? (int) config('model-cache.cache_duration', 60);
 
             if ($relatedMinutes === 0) {
                 return 0;
@@ -1513,8 +1518,6 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
      */
     protected function morphToStateFingerprint($relation, int $depth): string
     {
-        $this->hasMorphDependency = true;
-
         $types = $this->morphTypesForFingerprint();
 
         if ($types === null) {
@@ -1852,9 +1855,24 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
             return;
         }
 
-        $tracked = $builder instanceof self
-            ? $builder->aggregateSelectExpressions
-            : $this->aggregateSelectExpressions;
+        $tracked = $this->aggregateSelectExpressions;
+
+        $this->markUncertainInQuery($query, $tracked, 0);
+    }
+
+    /**
+     * Walk a query and every subquery it embeds. Raw SQL anywhere — columns,
+     * wheres, havings, join ON, orders, groups, unions — may read a table that
+     * cannot be tagged, so such queries must bypass the cache.
+     *
+     * @param  mixed  $query
+     * @param  mixed  $tracked
+     */
+    protected function markUncertainInQuery($query, $tracked, int $depth): void
+    {
+        if ($depth > 6 || $this->queryDependencyUncertain) {
+            return;
+        }
 
         foreach ((array) ($query->columns ?? []) as $column) {
             if ($column instanceof \Illuminate\Database\Query\Expression
@@ -1870,14 +1888,16 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
             }
         }
 
-        foreach ((array) ($query->wheres ?? []) as $where) {
-            if (($where['type'] ?? null) === 'raw'
-                && is_string($where['sql'] ?? null)
-                && preg_match('/\bselect\b/i', $where['sql'])) {
-                $this->queryDependencyUncertain = true;
+        $this->markUncertainInClauses((array) ($query->wheres ?? []), $query, $tracked, $depth);
 
-                return;
-            }
+        if ($this->queryDependencyUncertain) {
+            return;
+        }
+
+        $this->markUncertainInClauses((array) ($query->havings ?? []), $query, $tracked, $depth);
+
+        if ($this->queryDependencyUncertain) {
+            return;
         }
 
         foreach ((array) ($query->orders ?? []) as $order) {
@@ -1887,6 +1907,107 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
                 return;
             }
         }
+
+        foreach ((array) ($query->groups ?? []) as $group) {
+            if ($this->rawSqlContainsSelect($group, $query)) {
+                $this->queryDependencyUncertain = true;
+
+                return;
+            }
+        }
+
+        foreach ((array) ($query->joins ?? []) as $join) {
+            $wheres = is_array($join) ? ($join['wheres'] ?? []) : ($join->wheres ?? []);
+
+            $this->markUncertainInClauses((array) $wheres, $query, $tracked, $depth);
+
+            if ($this->queryDependencyUncertain) {
+                return;
+            }
+        }
+
+        foreach ((array) ($query->unions ?? []) as $union) {
+            $nested = is_array($union) ? ($union['query'] ?? null) : null;
+
+            if ($nested instanceof \Illuminate\Database\Eloquent\Builder) {
+                $nested = $nested->getQuery();
+            }
+
+            if ($nested instanceof \Illuminate\Database\Query\Builder) {
+                $this->markUncertainInQuery($nested, $tracked, $depth + 1);
+            }
+
+            if ($this->queryDependencyUncertain) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * @param  array<int, mixed>  $clauses
+     * @param  mixed  $query
+     * @param  mixed  $tracked
+     */
+    protected function markUncertainInClauses(array $clauses, $query, $tracked, int $depth): void
+    {
+        foreach ($clauses as $clause) {
+            if (! is_array($clause)) {
+                continue;
+            }
+
+            if (strtolower((string) ($clause['type'] ?? '')) === 'raw'
+                && is_string($clause['sql'] ?? null)
+                && preg_match('/\bselect\b/i', $clause['sql'])) {
+                $this->queryDependencyUncertain = true;
+
+                return;
+            }
+
+            if ($this->containsSubqueryExpression($clause['value'] ?? null, $query)
+                || $this->containsSubqueryExpression($clause['values'] ?? null, $query)) {
+                $this->queryDependencyUncertain = true;
+
+                return;
+            }
+
+            $nested = $clause['query'] ?? null;
+
+            if (is_array($nested)) {
+                $this->markUncertainInClauses($nested, $query, $tracked, $depth);
+            } elseif ($nested instanceof \Illuminate\Database\Eloquent\Builder) {
+                $this->markUncertainInQuery($nested->getQuery(), $tracked, $depth + 1);
+            } elseif ($nested instanceof \Illuminate\Database\Query\Builder) {
+                $this->markUncertainInQuery($nested, $tracked, $depth + 1);
+            }
+
+            if ($this->queryDependencyUncertain) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * Whether a where/having value wraps a subquery expression, which is how
+     * whereIn($column, $subquery) is compiled.
+     *
+     * @param  mixed  $value
+     * @param  mixed  $query
+     */
+    protected function containsSubqueryExpression($value, $query): bool
+    {
+        if ($value instanceof \Illuminate\Database\Query\Expression) {
+            return $this->rawSqlContainsSelect($value, $query);
+        }
+
+        if (is_array($value)) {
+            foreach ($value as $item) {
+                if ($this->containsSubqueryExpression($item, $query)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**

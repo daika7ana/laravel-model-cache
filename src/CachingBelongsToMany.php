@@ -5,9 +5,9 @@ namespace Daika7ana\LaravelModelCache;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
- * A belongsToMany relation that flushes the parent model's cache after a pivot
- * change. attach()/detach()/updateExistingPivot() are the only write paths that
- * change pivot rows — sync()/syncWithoutDetaching() route through them.
+ * A belongsToMany relation that flushes both models' caches after a pivot
+ * change, batching sync()'s per-row writes into a single flush — even when a
+ * partial write throws.
  */
 class CachingBelongsToMany extends BelongsToMany
 {
@@ -85,6 +85,11 @@ class CachingBelongsToMany extends BelongsToMany
 
         try {
             $changes = parent::sync($ids, $detaching);
+        } catch (\Throwable $e) {
+            // sync() is not transactional: a partial write may already be committed.
+            $this->flushCache('sync');
+
+            throw $e;
         } finally {
             $this->flushSuppressed = false;
         }
@@ -117,7 +122,7 @@ class CachingBelongsToMany extends BelongsToMany
             // relation, not just the parent's.
             $related = $this->getRelated();
 
-            if ($related !== $this->parent && method_exists($related, 'flushModelCache')) {
+            if (method_exists($related, 'flushModelCache')) {
                 $related->flushModelCache();
             }
 

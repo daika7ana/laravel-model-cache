@@ -2,7 +2,9 @@
 
 namespace Daika7ana\LaravelModelCache\Tests\Unit;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
 use Daika7ana\LaravelModelCache\ModelCacheDebugger;
 use Daika7ana\LaravelModelCache\Tests\Fixtures\Models\PostWithRelationships;
@@ -59,6 +61,48 @@ class PivotFlushBatchingTest extends TestCase
 
         $this->assertSame(0, $spy->syncFlushes);
         $this->assertSame(0, $spy->staticFlushes);
+    }
+
+    #[Test]
+    public function it_flushes_when_sync_fails_after_a_partial_write()
+    {
+        DB::statement('PRAGMA foreign_keys = ON');
+
+        $post = PostWithRelationships::create([
+            'title' => 'Test Post',
+            'content' => 'Test Content',
+            'published' => true,
+        ]);
+        $tag = Tag::create(['name' => 'Tag 1']);
+
+        $post->tags()->attach($tag->id);
+
+        // Warm both the eager-load and the relation-query caches.
+        PostWithRelationships::with('tags')->find($post->id);
+        $post->tags()->get();
+
+        try {
+            $post->tags()->sync([$tag->id, 999999]);
+            $this->fail('Expected sync() to throw a foreign key violation.');
+        } catch (QueryException $e) {
+            // expected
+        }
+
+        // The valid row was committed before the failing one, so the write is partial.
+        $this->assertSame(1, DB::table('post_tag')->count());
+
+        // A stale cache would answer these reads without any SQL.
+        DB::enableQueryLog();
+
+        $eagerLoaded = PostWithRelationships::with('tags')->find($post->id);
+        $relation = $post->tags()->get();
+        $log = DB::getQueryLog();
+
+        DB::disableQueryLog();
+
+        $this->assertNotEmpty($log);
+        $this->assertSame([$tag->id], $eagerLoaded->tags->pluck('id')->all());
+        $this->assertSame([$tag->id], $relation->pluck('id')->all());
     }
 
     private function installSpy(): object
