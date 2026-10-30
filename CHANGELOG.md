@@ -10,7 +10,7 @@ All notable changes to `laravel-model-cache` will be documented in this file.
 - Cache keys include the resolved state of every eager load: relation SQL/bindings, global scopes, `$with`, pivot settings, `as()`/`using()`, and nested relations. Existing entries will miss after upgrading.
 
 ### Changed
-- Per-model flushes now reset only that model's class/table tags instead of the shared `model_cache` tag, so writing one model no longer evicts unrelated models. `mcache:flush` with no argument still clears all cached model queries; `mcache:flush <Model>` uses the selective tags.
+- Per-model flushes now reset only that model's class/table tags instead of the shared `model_cache` tag, so writing one model no longer evicts unrelated models. Destructive flushes (`delete`, `forceDelete`, `truncate`) still reset the shared tag, because database cascades delete other models' rows without firing their events. `mcache:flush` with no argument still clears all cached model queries; `mcache:flush <Model>` uses the selective tags.
 - Pivot writes flush the related model's tags and the pivot table's tag, so cached relations and eager loads on either side see the change. `sync()` batches its per-id writes into a single flush when rows changed.
 - The shortest `$cacheMinutes` now also caps the root query when a relation is included via `withCount()`/`withSum()`/`withAvg()`/`withMin()`/`withMax()`/`withExists()`, and `0` disables the root snapshot.
 - Eager-load constraint closures run whenever a key or tag set is computed, including cache hits. Keep them side-effect free; avoid database queries inside them.
@@ -21,7 +21,9 @@ All notable changes to `laravel-model-cache` will be documented in this file.
 - Stale cached snapshots when a table was read inside an eager-load constraint (join or `whereHas`) but was not tagged.
 - Query bindings and columns are fingerprinted losslessly with PHP's `serialize()`: binary strings, binding types and objects are preserved exactly, and `Expression` objects use their raw SQL. Scalar binding lists are serialized as one array. Values that cannot be fingerprinted (resources, closures, opaque subquery sources) make the query bypass the cache instead of risking a key collision.
 - Queries with `afterQuery()` callbacks (on the base query or an eager-loaded relation, including `chaperone()`) bypass the cache, because the callback mutates the result after the query runs.
-- Raw SQL subqueries in `selectRaw`/`addSelect`, `whereRaw`, `orderByRaw`, or passed as `$columns` to `get()`/`paginate()` are now detected and bypass the cache instead of being cached without dependency tags.
+- Raw SQL subqueries in `selectRaw`/`addSelect`, `whereRaw`/`havingRaw`/`groupByRaw`, `orderByRaw`, join `ON` clauses, nested `where` blocks, `whereIn($column, $subquery)` and the columns passed to `get()`/`paginate()` are now detected and bypass the cache instead of being cached without dependency tags.
+- Cascaded rows of other models stay cached after a `delete`/`forceDelete`/`truncate` because the cascade fires no model events. Destructive flushes now also reset the shared `model_cache` tag.
+- A `sync()` that fails after committing some pivot rows left the relation cache stale; the failure path now flushes before rethrowing.
 - Opaque subquery sources (`fromSub()`, `joinSub()`, `selectSub()` closures/raw SQL) bypass the cache instead of being cached without dependency tags.
 
 ## [1.0.1] - 2026-10-13
