@@ -17,9 +17,20 @@ trait HasCachedQueries
      * `updated` event handler. The `deleted`/`restored` event handlers consume this
      * marker to skip their redundant flush (see markCacheFlushed()).
      *
-     * @var Model|null
+     * Held weakly so the marker never pins a model graph for the process lifetime.
+     * A collected reference reads as "no marker" — worst case one redundant flush.
+     *
+     * @var \WeakReference|null
      */
-    private static ?Model $cacheFlushedModel = null;
+    private static ?\WeakReference $cacheFlushedModel = null;
+
+    /**
+     * Whether the missing-tags warning was already logged in this process.
+     * Without it, every write on a non-taggable store logs the same line.
+     *
+     * @var bool
+     */
+    private static bool $warnedMissingTags = false;
 
     /**
      * Create a new Eloquent query builder for the model.
@@ -103,7 +114,7 @@ trait HasCachedQueries
      */
     public static function markCacheFlushed(Model $model): void
     {
-        static::$cacheFlushedModel = $model;
+        static::$cacheFlushedModel = \WeakReference::create($model);
     }
 
     /**
@@ -114,7 +125,7 @@ trait HasCachedQueries
      */
     public static function hasCacheFlushMarker(Model $model): bool
     {
-        return static::$cacheFlushedModel === $model;
+        return static::$cacheFlushedModel?->get() === $model;
     }
 
     /**
@@ -125,7 +136,7 @@ trait HasCachedQueries
      */
     public static function consumeCacheFlushMarker(Model $model): bool
     {
-        if (static::$cacheFlushedModel === $model) {
+        if (static::$cacheFlushedModel?->get() === $model) {
             static::$cacheFlushedModel = null;
 
             return true;
@@ -216,18 +227,22 @@ trait HasCachedQueries
                     $debugger->info("Cache flushed statically for model: {$modelClass}");
 
                     return $result;
-                } catch (\Exception $e) {
+                } catch (\Throwable $e) {
                     $debugger->error("Error flushing cache with tags for model {$modelClass}: {$e->getMessage()}");
                 }
             }
 
             // Without tags, we cannot safely flush only this model's cache.
             // Flushing the entire cache would destroy sessions, auth tokens, etc.
-            $debugger->warning("Cache driver does not support tags. Model cache invalidation requires Redis or Memcached. Skipping flush for model: {$modelClass}");
+            // The condition is identical for every write, so warn once per process.
+            if (! self::$warnedMissingTags) {
+                self::$warnedMissingTags = true;
+                $debugger->warning("Cache driver does not support tags. Model cache invalidation requires Redis or Memcached. Skipping flush for model: {$modelClass}");
+            }
 
             return false;
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $debugger->error('Error in flushCacheStatic for model ' . static::class . ": {$e->getMessage()}");
 
             return false;
@@ -250,7 +265,7 @@ trait HasCachedQueries
             }
 
             return \Illuminate\Support\Facades\Cache::store();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             // If there's an issue with the configured cache driver,
             // fall back to the default driver
             resolve(ModelCacheDebugger::class)->error("Error getting cache driver: {$e->getMessage()}");

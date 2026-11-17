@@ -115,7 +115,7 @@ class CachingBelongsToMany extends BelongsToMany
             } elseif (method_exists($this->parent, 'flushCache')) {
                 $this->parent->flushCache();
             } else {
-                throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The ModelRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
+                throw new \Exception('The parent model must have a flushCache() or flushModelCache() method defined. Make sure your model uses the HasCachedQueries trait. The HasCachedRelationships trait should be used in conjunction with the HasCachedQueries trait. See the documentation for more information.');
             }
 
             // A pivot write changes results cached from both sides of the

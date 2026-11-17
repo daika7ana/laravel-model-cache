@@ -115,6 +115,7 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
         $this->ensureDatabaseCacheTables();
 
         Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        Post::create(['title' => 'Post 2', 'content' => 'Content', 'published' => true]);
         Post::where('published', true)->get();
 
         $result = Post::flushModelCache();
@@ -122,8 +123,8 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
         $this->assertFalse($result, 'flushModelCache must return false when the store does not support tags');
 
         $warnings = array_filter($logger->records, fn($record) => $record[0] === 'warning');
-        $this->assertNotEmpty($warnings, 'A warning must explain that the flush was skipped');
-        $this->assertStringContainsString('does not support tags', $warnings[0][1]);
+        $this->assertCount(1, $warnings, 'The missing-tags warning must be logged only once per process');
+        $this->assertStringContainsString('does not support tags', $warnings[array_key_first($warnings)][1]);
     }
 
     // ========== Relationship cache edge cases ==========

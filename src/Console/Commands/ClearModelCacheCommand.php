@@ -120,9 +120,31 @@ class ClearModelCacheCommand extends Command
             return true;
         }
 
-        $this->components->warn('Cache flush was skipped: the configured store does not support tags. Use Redis or Memcached for selective invalidation.');
+        if (! $this->storeSupportsTags()) {
+            $this->components->warn('Cache flush was skipped: the configured store does not support tags. Use Redis or Memcached for selective invalidation.');
+
+            return false;
+        }
+
+        $this->components->warn('Cache flush failed. See the error above for details.');
 
         return false;
+    }
+
+    /**
+     * Check whether the store used by the flush supports tags. A failed tag
+     * flush is not a missing-tags store, and must not be reported as one.
+     */
+    protected function storeSupportsTags(): bool
+    {
+        try {
+            $store = config('model-cache.cache_store') ?: config('cache.default');
+            $cache = Cache::store($store);
+
+            return method_exists($cache, 'supportsTags') && $cache->supportsTags();
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     /**
