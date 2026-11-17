@@ -46,7 +46,7 @@ git checkout -b feature/your-feature-name
 
 ## Coding Standards
 
-This project follows PSR-12 and Laravel-style conventions.
+This project follows the `per` Pint preset (configured in `pint.json`).
 
 Check style:
 
@@ -68,6 +68,14 @@ Run the full test suite before opening a pull request:
 composer test
 ```
 
+To also test against the real tag stores, start the containers (requires the `memcached` and `redis` PHP extensions) and run each driver:
+
+```bash
+docker compose up -d
+CACHE_DRIVER=memcached composer test
+CACHE_DRIVER=redis composer test
+```
+
 When fixing a bug, include a test that fails before your fix and passes after it.
 
 ## Documentation Guidelines
@@ -81,7 +89,7 @@ Current docs index: `docs/README.md`.
 
 ## Pull Request Checklist
 
-- [ ] Branch is based on latest `main`
+- [ ] Branch is based on latest `master`
 - [ ] Changes are focused and scoped
 - [ ] Code style checks pass
 - [ ] Tests pass
