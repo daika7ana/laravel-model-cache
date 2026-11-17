@@ -58,26 +58,36 @@ abstract class TestCase extends Orchestra
             'serialize' => false,
         ]);
 
-        $app['config']->set('database.redis.client', env('REDIS_CLIENT', 'phpredis'));
-        $app['config']->set('database.redis.default', [
-            'host' => env('REDIS_HOST', '127.0.0.1'),
-            'password' => env('REDIS_PASSWORD', null),
-            'port' => (int) env('REDIS_PORT', 6379),
-            'database' => (int) env('REDIS_DB', 0),
-            'prefix' => env('REDIS_PREFIX', ''),
-        ]);
-
-        $app['config']->set('cache.stores.redis', [
-            'driver' => 'redis',
-            'connection' => 'default',
-        ]);
-
         $app['config']->set('cache.stores.database', [
             'driver' => 'database',
             'table' => env('CACHE_TABLE', 'cache'),
             'connection' => env('CACHE_DATABASE_CONNECTION', 'testing'),
             'lock_connection' => env('CACHE_LOCK_CONNECTION', 'testing'),
             'lock_table' => env('CACHE_LOCK_TABLE', 'cache_locks'),
+        ]);
+
+        $app['config']->set('cache.stores.memcached', [
+            'driver' => 'memcached',
+            'servers' => [
+                [
+                    'host' => env('MEMCACHED_HOST', '127.0.0.1'),
+                    'port' => env('MEMCACHED_PORT', 11211),
+                    'weight' => 1,
+                ],
+            ],
+        ]);
+
+        $app['config']->set('database.redis.client', 'phpredis');
+        $app['config']->set('database.redis.cache', [
+            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'password' => env('REDIS_PASSWORD', null),
+            'port' => env('REDIS_PORT', 6379),
+            'database' => env('REDIS_DB', 0),
+        ]);
+        $app['config']->set('cache.stores.redis', [
+            'driver' => 'redis',
+            'connection' => 'cache',
+            'lock_connection' => 'cache',
         ]);
 
         $app['config']->set('cache.default', $cacheDriver);

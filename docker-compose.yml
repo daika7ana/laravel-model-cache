@@ -1,0 +1,10 @@
+services:
+  memcached:
+    image: memcached:1.6
+    ports:
+      - "11211:11211"
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"

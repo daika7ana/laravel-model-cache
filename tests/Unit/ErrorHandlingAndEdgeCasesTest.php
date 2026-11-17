@@ -101,6 +101,7 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
         $this->assertFalse($defaults['debug_mode']);
         $this->assertFalse($defaults['use_cache_locks']);
         $this->assertSame(5, $defaults['cache_lock_seconds']);
+        $this->assertSame(0.25, $defaults['lock_wait_seconds']);
     }
 
     #[Test]
@@ -342,8 +343,8 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
     public function it_executes_query_when_stampede_lock_is_held()
     {
         config()->set('model-cache.use_cache_locks', true);
-        // Keep the polling loop short so the fallback path runs fast in tests.
-        config()->set('model-cache.cache_lock_seconds', 1);
+        // The poll loop is bounded by lock_wait_seconds (default 0.25s), so the
+        // fallback path already runs fast without overriding the lock duration.
 
         Post::create(['title' => 'Locked', 'content' => 'Content', 'published' => true]);
 
@@ -412,8 +413,8 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
     public function it_executes_aggregates_when_the_stampede_lock_is_held()
     {
         config()->set('model-cache.use_cache_locks', true);
-        // Keep the polling loop short so the fallback path runs fast in tests.
-        config()->set('model-cache.cache_lock_seconds', 1);
+        // The poll loop is bounded by lock_wait_seconds (default 0.25s), so the
+        // fallback path already runs fast without overriding the lock duration.
 
         Post::create(['title' => 'Locked', 'content' => 'Content', 'published' => true]);
 

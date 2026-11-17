@@ -2,6 +2,29 @@
 
 All notable changes to `laravel-model-cache` will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- `model-cache.lock_wait_seconds` / `MODEL_CACHE_LOCK_WAIT_SECONDS` (default 0.25s) caps how long a stampede waiter re-reads the cache before running the query itself.
+
+### Changed
+- **BREAKING:** dropped PHP 8.2 (EOL 31 Dec 2026); the package now requires PHP `^8.3` and CI tests 8.3/8.4/8.5. Laravel 11/12/13 support is unchanged.
+- **BREAKING:** removed the dead `scopeFlushCache()` local scope and the `CacheableBuilderContract` interface. `Post::where(...)->flushCache()` still works via the builder's own `flushCache()` method. Anyone type-hinting `CacheableBuilderContract` must remove that hint.
+- Cache keys now include connection identity (host/url/port) and cached values are wrapped to distinguish a stored `null`; existing entries will miss once after upgrading.
+
+### Fixed
+- Reads on cache stores without tag support now bypass the cache entirely — previously results were cached but never invalidated.
+- Reads inside an open database transaction now bypass the cache, so read-your-own-writes works and uncommitted rows are never cached.
+- `lockForUpdate()` / `sharedLock()` queries now bypass the cache, so the row lock is actually taken.
+- Cache-aside race: on version-based tag stores (Memcached, array), a value computed during a concurrent tag flush is no longer written into the fresh tag namespace. Redis deletes tagged keys on flush, so the guard is a no-op there and the narrow concurrent write-after-flush window remains.
+- A failing cache write no longer re-runs the DB query (`paginate()` no longer re-runs count + select).
+- Stampede lock pollers no longer block a worker for the full lock duration: a waiter re-reads the cache for at most `MODEL_CACHE_LOCK_WAIT_SECONDS` (default 0.25s), then runs the query itself. Queries slower than that cap no longer collapse concurrent requests onto the lock holder, so consider raising it for slow queries.
+- `insertOrIgnoreReturning()` now flushes the cache.
+- Cache keys distinguish `null` aggregate results, so `max()`/`min()`/`avg()` on an empty set is served from cache instead of re-querying.
+- Pivot flush transaction-deferral now uses the pivot write connection (the related model), not the parent connection.
+- A real tag-flush error no longer emits the misleading "does not support tags" warning.
+- Deduplicated the console cache-clear methods; added a `docker-compose.yml` (Memcached + Redis) and a working Redis test store.
+
 ## [1.1.1] - 2026-11-17
 
 ### Changed

@@ -6,7 +6,6 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
 use Daika7ana\LaravelModelCache\CacheableBuilder;
-use Daika7ana\LaravelModelCache\Contracts\CacheableBuilderContract;
 use Daika7ana\LaravelModelCache\HasCacheableModel;
 use Daika7ana\LaravelModelCache\HasCachedQueries;
 use Daika7ana\LaravelModelCache\HasCachedRelationships;
@@ -17,22 +16,7 @@ use Daika7ana\LaravelModelCache\Tests\Fixtures\RecorderLogger;
 use Daika7ana\LaravelModelCache\Tests\TestCase;
 
 /**
- * Regression tests for bug fixes.
- *
- * Each test maps to a specific bug that was fixed:
- * 1. Event handler was dead code (bootHasCachedQueries always returned early)
- * 2. flushModelCache() flushed entire app cache when tags unsupported
- * 3. phpunit.xml type mismatch for MODEL_CACHE_ENABLED
- * 4. aggregateFromCache() extraction
- * 5. Debug mode gating (resolve only when debug enabled)
- * 6. Debugger config caching removed
- * 7. Unnecessary method overrides removed
- * 8. debug_backtrace() usage improved
- * 9. Locale in cache key now configurable
- * 10. serialize() replaced with json_encode()
- * 11. getCacheDriver() cached as instance property
- * 12. Trait renamed HasCachableModel → HasCacheableModel
- * 13. Interfaces added
+ * Regression tests for bug fixes, including the audit fix regressions below.
  */
 class RegressionTest extends TestCase
 {
@@ -399,13 +383,12 @@ class RegressionTest extends TestCase
         $this->assertArrayHasKey(HasCacheableModel::class, $traits);
     }
 
-    // ========== 13. Interface contracts ==========
+    // ========== 13. Builder surface ==========
 
     #[Test]
-    public function it_implements_cacheable_builder_contract()
+    public function cacheable_builder_exposes_its_cache_api()
     {
         $builder = Post::query();
-        $this->assertInstanceOf(CacheableBuilderContract::class, $builder);
 
         $methods = [
             'getFromCache', 'firstFromCache', 'remember', 'withoutCache',
@@ -424,6 +407,182 @@ class RegressionTest extends TestCase
         $builder = Post::query();
         $this->assertInstanceOf(\Illuminate\Database\Eloquent\Builder::class, $builder);
         $this->assertInstanceOf(CacheableBuilder::class, $builder);
+    }
+
+    // ========== Audit fix regressions ==========
+
+    #[Test]
+    public function lock_for_update_queries_bypass_the_cache()
+    {
+        Post::create(['title' => 'Locked', 'content' => 'c', 'published' => true]);
+
+        // Warm the cache with an unlocked read.
+        $this->assertCount(1, Post::where('published', true)->get());
+
+        // Mutate via the non-cached model so a cache hit would serve stale data.
+        \Daika7ana\LaravelModelCache\Tests\Fixtures\Models\PostWithoutCache::where('published', true)
+            ->update(['title' => 'Changed behind cache']);
+
+        $titles = Post::where('published', true)->lockForUpdate()->get()->pluck('title')->all();
+
+        $this->assertSame(['Changed behind cache'], $titles, 'lockForUpdate() must read the DB, never the cache');
+    }
+
+    #[Test]
+    public function reads_inside_a_transaction_bypass_the_cache()
+    {
+        $post = Post::create(['title' => 'Before', 'content' => 'c', 'published' => true]);
+        Post::where('published', true)->get(); // warm
+
+        DB::transaction(function () {
+            Post::where('published', true)->update(['title' => 'Inside']);
+            // Same cache key as the warm read: the uncommitted update must be
+            // visible, so this must hit the DB, not the pre-write cached value.
+            $this->assertSame(
+                ['Inside'],
+                Post::where('published', true)->get()->pluck('title')->all(),
+            );
+        });
+    }
+
+    #[Test]
+    public function a_tagless_store_does_not_cache_reads()
+    {
+        config(['cache.default' => 'database']);
+        $this->ensureDatabaseCacheTables();
+
+        Post::create(['title' => 'First', 'content' => 'c', 'published' => true]);
+        $this->assertCount(1, Post::where('published', true)->get());
+
+        \Daika7ana\LaravelModelCache\Tests\Fixtures\Models\PostWithoutCache::create([
+            'title' => 'Second', 'content' => 'c', 'published' => true,
+        ]);
+
+        // With no tags, invalidation is impossible, so reads must go to the DB.
+        $this->assertCount(2, Post::where('published', true)->get());
+    }
+
+    #[Test]
+    public function insert_or_ignore_returning_invalidates_the_cache()
+    {
+        Post::create(['title' => 'Existing', 'content' => 'c', 'published' => true]);
+        $this->assertCount(1, Post::where('published', true)->get()); // warm
+
+        Post::query()->insertOrIgnoreReturning([
+            ['title' => 'Inserted', 'content' => 'c', 'published' => true],
+        ]);
+
+        $this->assertCount(2, Post::where('published', true)->get(), 'insertOrIgnoreReturning must flush the query cache');
+    }
+
+    #[Test]
+    public function a_failed_tag_flush_does_not_emit_the_missing_tags_warning()
+    {
+        // Reset the once-per-class warning latch so this test is independent.
+        $warned = new \ReflectionProperty(\Daika7ana\LaravelModelCache\HasCachedQueries::class, 'warnedMissingTags');
+        $warned->setValue(false);
+
+        // A concrete Repository mock (supportsTags is a real method) whose
+        // tags()->flush() throws. CacheStoreResolver calls store() first.
+        $cache = \Mockery::mock(\Illuminate\Cache\Repository::class);
+        $cache->shouldReceive('store')->andReturnSelf();
+        $cache->shouldReceive('supportsTags')->andReturn(true);
+        $tags = \Mockery::mock();
+        $tags->shouldReceive('flush')->andThrow(new \RuntimeException('boom'));
+        $cache->shouldReceive('tags')->andReturn($tags);
+        $this->app->instance('cache', $cache);
+        \Illuminate\Support\Facades\Cache::clearResolvedInstance('cache');
+
+        $logger = $this->installLogRecorder();
+
+        $this->assertFalse(Post::flushModelCache());
+
+        $messages = array_column($logger->records, 1);
+        // The real error IS logged, and the false "no tags" warning is NOT —
+        // proving the catch returned early instead of falling through.
+        $this->assertNotEmpty(array_filter($messages, fn($m) => str_contains($m, 'Error flushing cache with tags')));
+        foreach ($messages as $message) {
+            $this->assertStringNotContainsString('does not support tags', $message);
+        }
+    }
+
+    #[Test]
+    public function null_aggregates_are_served_from_cache()
+    {
+        // Empty set: max() returns null. A stored null must be a hit, not a
+        // permanent miss that re-runs the query every time.
+        $this->assertNull(Post::max('id')); // warm
+
+        DB::enableQueryLog();
+        Post::max('id');
+        $count = count(DB::getQueryLog());
+        DB::flushQueryLog();
+
+        $this->assertSame(0, $count, 'A cached null aggregate must not re-run the query');
+    }
+
+    #[Test]
+    public function a_flush_during_the_query_does_not_plant_a_stale_snapshot()
+    {
+        // Redis tagged caches delete entry keys on flush (RedisTaggedCache) and
+        // have no version namespace to bump, so this cache-aside race cannot
+        // occur there. The guard only applies to version-based tag stores.
+        if (config('cache.default') === 'redis') {
+            $this->markTestSkipped('Redis tag flushes delete keys rather than bumping a namespace.');
+        }
+
+        // The result is captured before the query; if a concurrent flush bumps
+        // the tag namespace while the query runs, the computed value must not be
+        // written into the fresh namespace.
+        Post::create(['title' => 'Original', 'content' => 'c', 'published' => true]);
+
+        $builder = Post::where('published', true);
+        $cacheKey = $builder->getCacheKey();
+
+        $flushed = false;
+        DB::listen(function ($query) use (&$flushed) {
+            if (! $flushed && str_contains($query->sql, 'select')) {
+                $flushed = true;
+                Post::flushModelCache(); // bump tag versions mid-read
+            }
+        });
+
+        $this->assertCount(1, $builder->get(), 'the query result itself is still correct');
+
+        // The value computed around the flush must NOT have been cached. Change
+        // the row with a non-cached model; a cached snapshot would serve the
+        // old title, a fresh read sees the new one.
+        \Daika7ana\LaravelModelCache\Tests\Fixtures\Models\PostWithoutCache::where('published', true)
+            ->update(['title' => 'Changed']);
+
+        $this->assertSame(
+            ['Changed'],
+            Post::where('published', true)->get()->pluck('title')->all(),
+            'a value computed across a flush must not be served from cache',
+        );
+    }
+
+    #[Test]
+    public function a_zero_lock_wait_falls_back_immediately()
+    {
+        config()->set('model-cache.use_cache_locks', true);
+        config()->set('model-cache.lock_wait_seconds', 0);
+
+        Post::create(['title' => 'Post', 'content' => 'c', 'published' => true]);
+        $builder = Post::where('published', true);
+
+        // Another request holds the stampede lock; with a zero wait cap the
+        // poller must not block and must execute the query directly.
+        $lock = \Illuminate\Support\Facades\Cache::store()->lock('stampede:' . $builder->getCacheKey(), 30);
+        $this->assertTrue($lock->get());
+
+        try {
+            $start = microtime(true);
+            $this->assertCount(1, $builder->get());
+            $this->assertLessThan(0.2, microtime(true) - $start, 'zero wait must fall back immediately');
+        } finally {
+            $lock->release();
+        }
     }
 
     // ========== 5. Debug mode gating ==========

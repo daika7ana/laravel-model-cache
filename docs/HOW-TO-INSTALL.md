@@ -16,7 +16,7 @@ This creates `config/model-cache.php`.
 
 ## 3) Choose a cache driver
 
-Tag-based invalidation requires a **tag-capable** driver: Redis or Memcached. With drivers that don't support tags (file, database), flushes are **skipped** instead of wiping unrelated application cache (sessions, auth, ...), and the first skipped write logs a warning.
+Caching and tag-based invalidation require a **tag-capable** driver: Redis or Memcached (the array store is tag-capable and used in tests). On drivers without tags (file, database), reads bypass the cache entirely — nothing is cached that could not be invalidated — and flushes are **skipped** instead of wiping unrelated application cache (sessions, auth, ...), with one warning per model class.
 
 ```env
 # Redis
@@ -27,8 +27,6 @@ REDIS_CLIENT=phpredis
 CACHE_STORE=memcached
 MEMCACHED_HOST=127.0.0.1
 ```
-
-> Reads are cached with any driver — only selective invalidation needs tags.
 
 ## 4) Configuration reference
 
@@ -43,5 +41,6 @@ MEMCACHED_HOST=127.0.0.1
 | `debug_mode` | `MODEL_CACHE_DEBUG` | `false` | Log key generation, cache hits/misses, and flush operations |
 | `use_cache_locks` | `MODEL_CACHE_USE_LOCKS` | `false` | Stampede prevention |
 | `cache_lock_seconds` | `MODEL_CACHE_LOCK_SECONDS` | `5` | Stampede lock duration (seconds) |
+| `lock_wait_seconds` | `MODEL_CACHE_LOCK_WAIT_SECONDS` | `0.25` | Max wait for a stampede lock holder before running the query |
 
-> Errors and warnings are always logged; only `debug`/`info` messages are gated behind `debug_mode`.
+> Flush errors and warnings are always logged; cache read/write failures (with `debug_mode` on) and `debug`/`info` messages are gated behind `debug_mode`.

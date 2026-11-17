@@ -56,7 +56,7 @@ $post->tags()->sync([2, 3]);
 
 ## Stampede prevention (optional)
 
-With `MODEL_CACHE_USE_LOCKS=true` (or a per-model `$cacheLockSeconds`), a cache miss acquires a lock; concurrent requests wait briefly and reuse the freshly computed value instead of all hitting the database.
+With `MODEL_CACHE_USE_LOCKS=true`, a cache miss acquires a lock; concurrent requests wait briefly and reuse the freshly computed value instead of all hitting the database. A waiter re-reads for up to `MODEL_CACHE_LOCK_WAIT_SECONDS` (default 0.25 s, also bounded by the lock duration; a per-model `$cacheLockSeconds` overrides that duration) then runs the query itself — so queries slower than the cap are not collapsed onto the lock holder.
 
 ## Transaction-aware invalidation
 

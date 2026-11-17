@@ -20,9 +20,9 @@ Cache Eloquent queries with minimal code changes and automatic invalidation.
 
 ## Requirements
 
-- PHP `^8.2`
+- PHP `^8.3`
 - Laravel `11.x` through `13.x`
-- Redis or Memcached for tag-based invalidation (recommended)
+- A tag-capable store (Redis or Memcached) — required: tag-less stores bypass caching entirely (the array store is tag-capable and used in tests)
 
 ## Quick Start
 

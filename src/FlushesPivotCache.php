@@ -131,9 +131,12 @@ trait FlushesPivotCache
             resolve(ModelCacheDebugger::class)->info("Cache flushed after {$operation} operation for model: " . get_class($this->parent));
         };
 
-        $connection = $this->parent->getConnection();
+        // Pivot writes go through newPivotStatement(), which uses the related
+        // model's builder/connection — not the parent's. Defer on that same
+        // connection so a rollback on it never leaves a stale cache behind.
+        $connection = $this->getQuery()->getConnection();
 
-        // Defer flush until the model's connection commits to avoid flushing on rollback
+        // Defer flush until the write connection commits to avoid flushing on rollback
         if ($connection->transactionLevel() > 0) {
             $connection->afterCommit($flush);
         } else {
