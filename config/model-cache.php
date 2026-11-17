@@ -103,4 +103,19 @@ return [
     |
     */
     'cache_lock_seconds' => (int) env('MODEL_CACHE_LOCK_SECONDS', 5),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cache Lock Wait Duration (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | The maximum number of seconds a waiting request re-reads the cache for
+    | a stampede lock holder's result before executing the query itself. It is
+    | always capped by the effective lock duration (cache_lock_seconds or the
+    | per-model $cacheLockSeconds). Raise this for slow queries so
+    | concurrent requests collapse onto the lock holder's result; the default
+    | keeps workers unblocked when a result is never cacheable.
+    |
+    */
+    'lock_wait_seconds' => (float) env('MODEL_CACHE_LOCK_WAIT_SECONDS', 0.25),
 ];
