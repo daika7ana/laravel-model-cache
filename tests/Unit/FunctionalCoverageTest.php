@@ -93,6 +93,20 @@ class FunctionalCoverageTest extends TestCase
     }
 
     #[Test]
+    public function it_bypasses_cache_with_without_cache_on_get_from_cache()
+    {
+        Post::create(['title' => 'Post 1', 'content' => 'Content', 'published' => true]);
+
+        DB::enableQueryLog();
+        Post::where('published', true)->withoutCache()->getFromCache();
+        Post::where('published', true)->withoutCache()->getFromCache();
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertSame(2, $queries, 'getFromCache() must honour withoutCache()');
+    }
+
+    #[Test]
     public function it_disables_remember_when_globally_disabled()
     {
         config()->set('model-cache.enabled', false);
@@ -287,6 +301,47 @@ class FunctionalCoverageTest extends TestCase
         $posts = Post::where('published', true)->get();
         $this->assertGreaterThan(0, $posts->count(), 'Cache should be invalidated after insertOrIgnore');
         $this->assertGreaterThan(0, count(DB::getQueryLog()));
+    }
+
+    #[Test]
+    public function it_invalidates_cache_on_insert_or_ignore_using()
+    {
+        $source = Post::create(['title' => 'Source', 'content' => 'Content', 'published' => true]);
+
+        $this->assertSame(1, Post::count()); // Cache
+
+        Post::query()->insertOrIgnoreUsing(
+            ['title', 'content', 'published', 'views', 'created_at', 'updated_at'],
+            DB::table('posts')
+                ->selectRaw("'Inserted', content, published, views, created_at, updated_at")
+                ->where('id', $source->id),
+        );
+
+        DB::enableQueryLog();
+        $count = Post::count();
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertSame(2, $count, 'Cache should be invalidated after insertOrIgnoreUsing');
+        $this->assertGreaterThan(0, $queries);
+    }
+
+    #[Test]
+    public function it_invalidates_cache_on_average()
+    {
+        Post::create(['title' => 'Post 1', 'content' => 'Content', 'published' => true, 'views' => 100]);
+
+        $this->assertEquals(100, Post::where('published', true)->average('views'));
+
+        Post::create(['title' => 'Post 2', 'content' => 'Content', 'published' => true, 'views' => 300]);
+
+        DB::enableQueryLog();
+        $average = Post::where('published', true)->average('views');
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertEquals(200, $average, 'average() must read fresh data after a write');
+        $this->assertGreaterThan(0, $queries);
     }
 
     #[Test]

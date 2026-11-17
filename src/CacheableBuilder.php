@@ -88,6 +88,15 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
     protected $eagerDependencyModels = [];
 
     /**
+     * Models read by withCount()/withSum()/… aggregates. Kept apart from the
+     * eager-load arrays because getCacheKey() resets those, and an aggregate's
+     * TTL must still cap the root query.
+     *
+     * @var array<class-string, \Illuminate\Database\Eloquent\Model>
+     */
+    protected $aggregateDependencyModels = [];
+
+    /**
      * Whether eager loads were already resolved for the current key.
      *
      * @var bool
@@ -176,6 +185,11 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
     public function getFromCache($columns = ['*']): Collection
     {
         if (config('model-cache.enabled', true) === false) {
+            return $this->getWithoutCache($columns);
+        }
+
+        // Check if caching is disabled for this query
+        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
             return $this->getWithoutCache($columns);
         }
 
@@ -1359,9 +1373,9 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
      */
     protected function effectiveCacheMinutes(): int
     {
-        $minutes = (int) ($this->cacheMinutes ?: config('model-cache.cache_duration', 60));
+        $minutes = (int) ($this->cacheMinutes ?? config('model-cache.cache_duration', 60));
 
-        foreach ($this->eagerDependencyModels as $model) {
+        foreach (array_merge($this->eagerDependencyModels, $this->aggregateDependencyModels) as $model) {
             $relatedMinutes = $this->modelCacheMinutes($model)
                 ?? (int) config('model-cache.cache_duration', 60);
 
@@ -1832,6 +1846,10 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
             $this->eagerDependencyModels = array_merge(
                 $this->eagerDependencyModels,
                 $query->eagerDependencyModels,
+            );
+            $this->aggregateDependencyModels = array_merge(
+                $this->aggregateDependencyModels,
+                $query->aggregateDependencyModels,
             );
             $this->queryDependencyUncertain = $this->queryDependencyUncertain || $query->queryDependencyUncertain;
         }
@@ -2319,7 +2337,7 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
             }
 
             $this->queryDependencyTables[] = $relation->getRelated()->getTable();
-            $this->eagerDependencyModels[get_class($relation->getRelated())] = $relation->getRelated();
+            $this->aggregateDependencyModels[get_class($relation->getRelated())] = $relation->getRelated();
 
             if ($relation instanceof \Illuminate\Database\Eloquent\Relations\BelongsToMany) {
                 $this->queryDependencyTables[] = $relation->getTable();

@@ -422,6 +422,43 @@ class UpstreamParityTest extends TestCase
     }
 
     #[Test]
+    public function it_applies_the_related_model_ttl_cap_to_with_count_queries()
+    {
+        $author = ZeroCacheAuthor::create(['name' => 'Zero', 'email' => 'zero@example.com']);
+        $post = ZeroCachePost::create([
+            'title' => 'Post',
+            'content' => 'Content',
+            'published' => true,
+            'author_id' => $author->id,
+        ]);
+
+        $builder = ZeroCachePost::withCount('author')->where('id', $post->id);
+        $builder->getCacheKey();
+
+        $method = new \ReflectionMethod(CacheableBuilder::class, 'effectiveCacheMinutes');
+
+        $this->assertSame(0, $method->invoke($builder));
+
+        DB::enableQueryLog();
+        ZeroCachePost::withCount('author')->where('id', $post->id)->get();
+        ZeroCachePost::withCount('author')->where('id', $post->id)->get();
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertSame(2, $queries, 'A related $cacheMinutes = 0 must prevent caching of withCount() queries');
+    }
+
+    #[Test]
+    public function it_uses_the_configured_default_ttl_when_no_cache_minutes_are_set()
+    {
+        $builder = Post::query();
+
+        $method = new \ReflectionMethod(CacheableBuilder::class, 'effectiveCacheMinutes');
+
+        $this->assertSame(60, $method->invoke($builder));
+    }
+
+    #[Test]
     public function it_invalidates_when_an_eager_load_constraint_filters_on_another_table()
     {
         $author = Author::create(['name' => 'Author', 'email' => 'author@example.com']);
