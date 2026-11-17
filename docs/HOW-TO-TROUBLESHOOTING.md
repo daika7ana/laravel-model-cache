@@ -8,6 +8,7 @@
 4. Is the store tag-capable (Redis, Memcached)? Tag-less stores (file, database) bypass caching entirely.
 5. Is a database transaction open on the query's connection? Reads inside a transaction bypass the cache.
 6. Does the query use `lockForUpdate()` / `sharedLock()`? Locked reads bypass the cache so the lock is actually taken.
+7. Does the query use `inRandomOrder()` (directly or inside an eager load)? Random-ordered reads bypass the cache so each call gets a fresh order.
 
 ## Stale data
 

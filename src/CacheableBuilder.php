@@ -602,6 +602,69 @@ class CacheableBuilder extends Builder
     }
 
     /**
+     * Determine if any rows match the query, using the cache.
+     *
+     * @return bool
+     */
+    public function exists()
+    {
+        if (config('model-cache.enabled', true) === false) {
+            return parent::exists();
+        }
+
+        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
+            return parent::exists();
+        }
+
+        // exists() uses the same base SQL as get(), so fingerprint a marker that
+        // keeps its boolean entry from colliding with a collection key.
+        $cacheKey = $this->getCacheKey(['exists'], false);
+        $cacheTags = $this->getCacheTags();
+        $minutes = $this->effectiveCacheMinutes();
+
+        if ($this->shouldBypassCache($minutes)) {
+            return parent::exists();
+        }
+
+        $callback = fn() => parent::exists();
+
+        try {
+            return $this->rememberWithLock($cacheKey, $minutes * 60, $callback, $cacheTags);
+        } catch (\Throwable $e) {
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->error("Cache read failed for exists, bypassing cache: {$e->getMessage()}");
+            }
+
+            return $callback();
+        }
+    }
+
+    /**
+     * Determine if no rows match the query, reusing the cached exists() entry.
+     *
+     * @return bool
+     */
+    public function doesntExist()
+    {
+        return ! $this->exists();
+    }
+
+    /**
+     * Random ordering must not be frozen into a cache entry: every call needs a
+     * fresh order. Reuse the per-query cacheMinutes bypass rather than adding a
+     * dedicated flag, since each builder instance already carries its own TTL.
+     *
+     * @param  string  $seed
+     * @return $this
+     */
+    public function inRandomOrder($seed = '')
+    {
+        parent::inRandomOrder($seed);
+
+        return $this->withoutCache();
+    }
+
+    /**
      * Override the sum method to automatically use cache.
      *
      * @param  string  $column
@@ -1540,6 +1603,15 @@ class CacheableBuilder extends Builder
             // A constraint may call afterQuery() on the relation query. Check
             // again after the constraint runs, not only before it.
             if ($this->builderHasAfterQueryCallbacks($relation->getQuery())) {
+                $this->eagerLoadUnfingerprintable = true;
+            }
+
+            // A random order inside an eager load must not be frozen into the
+            // parent's cached collection. The child builder disables its own
+            // cache, but the parent still needs to bypass for that relationship.
+            $relationQuery = $relation->getQuery();
+
+            if ($relationQuery instanceof self && $relationQuery->cacheMinutes === 0) {
                 $this->eagerLoadUnfingerprintable = true;
             }
 
