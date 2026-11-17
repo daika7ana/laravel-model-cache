@@ -71,7 +71,6 @@ class HasCachedQueriesTest extends TestCase
         $builder = PostWithCustomCache::query()->where('published', true);
 
         $property = (new \ReflectionClass($builder))->getProperty('cacheMinutes');
-        $property->setAccessible(true);
 
         $this->assertSame(120, $property->getValue($builder), 'Model cacheMinutes must be applied to the builder');
     }
@@ -83,7 +82,6 @@ class HasCachedQueriesTest extends TestCase
         $builder = PostWithCustomCache::query()->where('published', true);
 
         $property = (new \ReflectionClass($builder))->getProperty('cachePrefix');
-        $property->setAccessible(true);
 
         $this->assertSame('custom_post_', $property->getValue($builder), 'Model cachePrefix must be applied to the builder');
     }

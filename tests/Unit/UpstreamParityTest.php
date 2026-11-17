@@ -417,7 +417,6 @@ class UpstreamParityTest extends TestCase
         $builder->getCacheKey();
 
         $method = new \ReflectionMethod(CacheableBuilder::class, 'effectiveCacheMinutes');
-        $method->setAccessible(true);
 
         $this->assertSame(1, $method->invoke($builder));
     }
@@ -560,7 +559,6 @@ class UpstreamParityTest extends TestCase
     public function it_keeps_simple_raw_columns_cacheable()
     {
         $method = new \ReflectionMethod(CacheableBuilder::class, 'shouldBypassCache');
-        $method->setAccessible(true);
 
         $columnBuilder = Post::query()->select([DB::raw('title as a')]);
         $columnBuilder->getCacheKey();
@@ -679,7 +677,6 @@ class UpstreamParityTest extends TestCase
     public function it_bypasses_unserializable_binding_values()
     {
         $method = new \ReflectionMethod(CacheableBuilder::class, 'shouldBypassCache');
-        $method->setAccessible(true);
 
         $closure = Post::query()->whereRaw('title = ?', [static fn() => 'x']);
         $closure->getCacheKey();
