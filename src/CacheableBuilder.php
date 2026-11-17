@@ -88,6 +88,15 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
     protected $eagerDependencyModels = [];
 
     /**
+     * Models read by withCount()/withSum()/… aggregates. Kept apart from the
+     * eager-load arrays because getCacheKey() resets those, and an aggregate's
+     * TTL must still cap the root query.
+     *
+     * @var array<class-string, \Illuminate\Database\Eloquent\Model>
+     */
+    protected $aggregateDependencyModels = [];
+
+    /**
      * Whether eager loads were already resolved for the current key.
      *
      * @var bool
@@ -176,6 +185,11 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
     public function getFromCache($columns = ['*']): Collection
     {
         if (config('model-cache.enabled', true) === false) {
+            return $this->getWithoutCache($columns);
+        }
+
+        // Check if caching is disabled for this query
+        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
             return $this->getWithoutCache($columns);
         }
 
@@ -1359,9 +1373,9 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
      */
     protected function effectiveCacheMinutes(): int
     {
-        $minutes = (int) ($this->cacheMinutes ?: config('model-cache.cache_duration', 60));
+        $minutes = (int) ($this->cacheMinutes ?? config('model-cache.cache_duration', 60));
 
-        foreach ($this->eagerDependencyModels as $model) {
+        foreach (array_merge($this->eagerDependencyModels, $this->aggregateDependencyModels) as $model) {
             $relatedMinutes = $this->modelCacheMinutes($model)
                 ?? (int) config('model-cache.cache_duration', 60);
 
@@ -1499,7 +1513,7 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
                 return $this->morphToStateFingerprint($relation, $depth + 1);
             }
 
-            $this->recordEagerDependency($relation);
+            $this->recordRelationDependency($relation, $this->eagerDependencyTables, $this->eagerDependencyModels);
 
             return $this->relationStateFingerprint($relation, $depth + 1);
         } catch (\Throwable $e) {
@@ -1833,6 +1847,10 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
                 $this->eagerDependencyModels,
                 $query->eagerDependencyModels,
             );
+            $this->aggregateDependencyModels = array_merge(
+                $this->aggregateDependencyModels,
+                $query->aggregateDependencyModels,
+            );
             $this->queryDependencyUncertain = $this->queryDependencyUncertain || $query->queryDependencyUncertain;
         }
     }
@@ -2043,19 +2061,24 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
     }
 
     /**
-     * Record the tables and models an eager-loaded relation reads.
+     * Record the tables and models a relation reads. Eager loads and
+     * withCount()/withSum()/… aggregates use the same rules, so they share
+     * this recorder and only differ in where the result is stored.
+     *
+     * @param  array<int, string>  $tables
+     * @param  array<class-string, \Illuminate\Database\Eloquent\Model>  $models
      */
-    protected function recordEagerDependency($relation): void
+    protected function recordRelationDependency($relation, array &$tables, array &$models): void
     {
-        $this->eagerDependencyTables[] = $relation->getRelated()->getTable();
-        $this->eagerDependencyModels[get_class($relation->getRelated())] = $relation->getRelated();
+        $tables[] = $relation->getRelated()->getTable();
+        $models[get_class($relation->getRelated())] = $relation->getRelated();
 
         if ($relation instanceof \Illuminate\Database\Eloquent\Relations\BelongsToMany) {
-            $this->eagerDependencyTables[] = $relation->getTable();
+            $tables[] = $relation->getTable();
         }
 
         if ($relation instanceof \Illuminate\Database\Eloquent\Relations\HasOneOrManyThrough) {
-            $this->eagerDependencyTables[] = $relation->getParent()->getTable();
+            $tables[] = $relation->getParent()->getTable();
         }
     }
 
@@ -2318,16 +2341,7 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
                 return;
             }
 
-            $this->queryDependencyTables[] = $relation->getRelated()->getTable();
-            $this->eagerDependencyModels[get_class($relation->getRelated())] = $relation->getRelated();
-
-            if ($relation instanceof \Illuminate\Database\Eloquent\Relations\BelongsToMany) {
-                $this->queryDependencyTables[] = $relation->getTable();
-            }
-
-            if ($relation instanceof \Illuminate\Database\Eloquent\Relations\HasOneOrManyThrough) {
-                $this->queryDependencyTables[] = $relation->getParent()->getTable();
-            }
+            $this->recordRelationDependency($relation, $this->queryDependencyTables, $this->aggregateDependencyModels);
 
             $builder = $relation->getQuery();
         }
@@ -2477,21 +2491,6 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
             return $this->cacheDriver;
         }
 
-        try {
-            $cacheStore = config('model-cache.cache_store');
-
-            if ($cacheStore) {
-                $this->cacheDriver = Cache::store($cacheStore);
-            } else {
-                $this->cacheDriver = Cache::store();
-            }
-        } catch (\Throwable $e) {
-            // Surface a misconfigured store instead of silently using another one,
-            // then fall back so reads don't break.
-            resolve(ModelCacheDebugger::class)->warning("Configured model cache store is unavailable ({$e->getMessage()}); falling back to the default cache store.");
-            $this->cacheDriver = Cache::store(config('cache.default'));
-        }
-
-        return $this->cacheDriver;
+        return $this->cacheDriver = CacheStoreResolver::resolve();
     }
 }

@@ -2,6 +2,19 @@
 
 All notable changes to `laravel-model-cache` will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- `withCount()` / `withSum()` / `withAvg()` / `withMin()` / `withMax()` / `withExists()` now cap the root query's TTL the same way `with()` does: the shortest `$cacheMinutes` across the root, its eager loads, and its aggregate relations wins, and `0` on a related model disables the root snapshot. Previously only eager loads affected the root TTL.
+- Stores without tag support warn once per model class instead of on every write; the flush is still skipped and `flushModelCache()` still returns `false`.
+
+### Fixed
+- `morphToMany()` / `morphedByMany()` pivot writes did not invalidate anything: only the `belongsToMany` factory was wrapped, so `attach()`/`detach()`/`sync()` on a polymorphic pivot left every cached eager load stale until the TTL expired. `HasCachedRelationships` now wraps both, sharing the batching and transaction-deferral logic with `CachingBelongsToMany` through one trait.
+- `withoutCache()->getFromCache()` and `remember(0)->getFromCache()` returned cached data. A `0` TTL now bypasses the cache on every explicit `*FromCache()` read, matching `firstFromCache()`.
+- Cache flush paths caught `\Exception` only, so an `\Error` raised by the cache backend escaped to the caller. They now catch `\Throwable` and fail open (`flushModelCache()` / `flushCache()` return `false`).
+- `mcache:flush <Model>` reported every flush that returned `false` as "the configured store does not support tags", even when the tag flush had just thrown. A failed flush and a tag-less store now print different messages; the exit code stays `1`.
+- The exception raised when a `CachingBelongsToMany` parent has no flush method named the nonexistent `ModelRelationships` trait; it now names `HasCachedRelationships`.
+
 ## [1.1.0] - 2026-10-30
 
 ### Added

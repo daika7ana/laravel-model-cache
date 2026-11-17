@@ -115,6 +115,7 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
         $this->ensureDatabaseCacheTables();
 
         Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        Post::create(['title' => 'Post 2', 'content' => 'Content', 'published' => true]);
         Post::where('published', true)->get();
 
         $result = Post::flushModelCache();
@@ -122,8 +123,27 @@ class ErrorHandlingAndEdgeCasesTest extends TestCase
         $this->assertFalse($result, 'flushModelCache must return false when the store does not support tags');
 
         $warnings = array_filter($logger->records, fn($record) => $record[0] === 'warning');
-        $this->assertNotEmpty($warnings, 'A warning must explain that the flush was skipped');
-        $this->assertStringContainsString('does not support tags', $warnings[0][1]);
+        $this->assertCount(1, $warnings, 'The missing-tags warning must be logged only once per model class');
+        $this->assertStringContainsString('does not support tags', $warnings[array_key_first($warnings)][1]);
+    }
+
+    #[Test]
+    public function it_falls_back_to_the_default_store_when_the_model_cache_store_is_unknown()
+    {
+        // Reads and flushes must resolve the same store: an unusable
+        // model-cache.cache_store falls back instead of failing the write.
+        config()->set('model-cache.cache_store', 'missing-store');
+
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        Post::where('published', true)->get();
+
+        DB::enableQueryLog();
+        Post::where('published', true)->get();
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $this->assertSame(0, $queries, 'The fallback store must serve reads');
+        $this->assertTrue(Post::flushModelCache(), 'The fallback store supports tags, so the flush must run');
     }
 
     // ========== Relationship cache edge cases ==========

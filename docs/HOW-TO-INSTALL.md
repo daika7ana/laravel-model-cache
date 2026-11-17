@@ -16,7 +16,7 @@ This creates `config/model-cache.php`.
 
 ## 3) Choose a cache driver
 
-Tag-based invalidation requires a **tag-capable** driver: Redis or Memcached. With drivers that don't support tags (file, database), writes log a warning and **skip the flush** instead of wiping unrelated application cache (sessions, auth, ...).
+Tag-based invalidation requires a **tag-capable** driver: Redis or Memcached. With drivers that don't support tags (file, database), flushes are **skipped** instead of wiping unrelated application cache (sessions, auth, ...), and the first skipped write logs a warning.
 
 ```env
 # Redis

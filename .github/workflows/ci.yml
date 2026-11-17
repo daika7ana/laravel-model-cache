@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: [8.3, 8.4]
+        php: [8.2, 8.3, 8.4]
         driver: [memcached, array]
     services:
       memcached:
@@ -36,7 +36,7 @@ jobs:
       - name: Check style
         run: composer check-style
 
-      # phpunit.xml defaults to memcached; the step-level env override wins
+      # phpunit.xml defaults to the array store; the step-level env override selects the driver
       # (PHPUnit only sets env vars that are not already defined).
       - name: Run tests
         env:
