@@ -591,6 +591,52 @@ class CacheableBuilder extends Builder
     }
 
     /**
+     * Retrieve a column's values from cache.
+     *
+     * @param  string|\Illuminate\Contracts\Database\Query\Expression  $column
+     * @param  string|null  $key
+     * @return \Illuminate\Support\Collection
+     */
+    public function pluckFromCache($column, $key = null)
+    {
+        if (config('model-cache.enabled', true) === false) {
+            return parent::pluck($column, $key);
+        }
+
+        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
+            return parent::pluck($column, $key);
+        }
+
+        if ($this->hasAfterQueryCallbacks()) {
+            return parent::pluck($column, $key);
+        }
+
+        $this->markUncertainForRawColumns([$column, $key]);
+
+        // pluck() selects on a clone of the base query, so the column is absent
+        // from toSql(). Fingerprint it explicitly to avoid colliding key/values.
+        $cacheKey = $this->getCacheKey(['pluck', $column, $key], false);
+        $cacheTags = $this->getCacheTags();
+        $minutes = $this->effectiveCacheMinutes();
+
+        if ($this->shouldBypassCache($minutes)) {
+            return parent::pluck($column, $key);
+        }
+
+        $callback = fn() => parent::pluck($column, $key);
+
+        try {
+            return $this->rememberWithLock($cacheKey, $minutes * 60, $callback, $cacheTags);
+        } catch (\Throwable $e) {
+            if (config('model-cache.debug_mode', false)) {
+                resolve(ModelCacheDebugger::class)->error("Cache read failed for pluck, bypassing cache: {$e->getMessage()}");
+            }
+
+            return $callback();
+        }
+    }
+
+    /**
      * Override the count method to automatically use cache.
      *
      * @param  string  $columns
@@ -654,6 +700,18 @@ class CacheableBuilder extends Builder
     public function average($column)
     {
         return $this->avg($column);
+    }
+
+    /**
+     * Override pluck to automatically use cache.
+     *
+     * @param  string|\Illuminate\Contracts\Database\Query\Expression  $column
+     * @param  string|null  $key
+     * @return \Illuminate\Support\Collection
+     */
+    public function pluck($column, $key = null)
+    {
+        return $this->pluckFromCache($column, $key);
     }
 
     /**
