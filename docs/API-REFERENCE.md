@@ -55,7 +55,7 @@ All methods below are available on query chains (`Post::where(...)->method()`). 
 | Trait | Contents |
 |-------|----------|
 | `HasCachedQueries` | The caching builder + invalidation events. Required for any caching. |
-| `HasCachedRelationships` | `belongsToMany()` returns `CachingBelongsToMany`, which auto-flushes on pivot changes. Also provides legacy helper methods (below). |
+| `HasCachedRelationships` | `belongsToMany()` returns `CachingBelongsToMany` and `morphToMany()`/`morphedByMany()` return `CachingMorphToMany`; both auto-flush on pivot changes. Also provides legacy helper methods (below). |
 | `HasCacheableModel` | Convenience: both of the above. |
 
 ### Pivot operations that auto-flush
@@ -66,7 +66,7 @@ On a model with `HasCachedRelationships`, these flush the model cache — gated 
 - `detach()` — flushes only when rows were actually detached
 - `sync()` / `syncWithoutDetaching()` — flushes only when pivot rows changed
 - `updateExistingPivot()` — flushes only when a row was updated
-- **Not covered:** `morphToMany()` / `morphedByMany()` return Laravel's plain `MorphToMany`, so their `attach()`/`detach()`/`sync()` do **not** auto-flush, and nothing warns at runtime — the relation stays stale until the TTL expires or another write flushes the parent. If the related model declares `$touches`, `BelongsToMany::touchIfTouching()` saves the parent, which fires `updated` and flushes the parent's cache, so you get parent-only invalidation while queries on the related side stay stale. Add `HasCachedRelationships` for `belongsToMany` coverage, and call `$model->flushCache()` after polymorphic pivot writes, or model the pivot as a `belongsToMany`.
+- `morphToMany()` / `morphedByMany()` follow the same rules: attach/detach/sync on a polymorphic pivot flush the parent, the related model and the pivot table's tag. A relation on a model **without** `HasCachedRelationships` keeps Laravel's plain `MorphToMany` and does not flush.
 
 ### Legacy helper methods (optional)
 
@@ -96,7 +96,7 @@ A different value in any component — e.g. a different column list, eager load,
 - **Transactions** — every flush is deferred on the model's own connection (`$model->getConnection()->afterCommit()`) until the transaction commits; a rollback never flushes. In multi-connection apps, Laravel attaches the callback to the most recent pending transaction, so defer reads/writes until all transactions have closed.
 - **Non-tag stores** — `flushModelCache()` skips the flush, logs a warning once per model class, and returns `false` rather than wiping unrelated application cache. Use Redis/Memcached for tag-based invalidation.
 - **Flush scope** — every cached query stores the shared `model_cache` tag plus its root model/table and any dependency tags it reads (eager-loaded relations, pivot/through tables, joins, `whereHas` subqueries, unions, and `withCount`/`withSum` relations). A per-model flush resets only that model's class/table tags, so writing one model does not evict unrelated models. Destructive flushes (`delete`, `forceDelete`, `truncate`) also reset the shared `model_cache` tag, because a database-level cascade deletes rows of other models without firing their events. `php artisan mcache:flush` with no argument still flushes the shared `model_cache` tag and clears every cached model query.
-- **Dependency limits** — `morphTo` eager loads are keyed and tagged per mapped morph type (via `Relation::morphMap()`); without a morph map they bypass the cache, and every morph type must be registered in the map. Building a `morphTo` key queries the resolved state of every registered morph type, so a large morph map adds CPU work to every read, including cache hits. Opaque subquery sources (`fromSub()`, `joinSub()`, `selectSub()` closures/raw SQL) still cannot be tagged safely; queries using them bypass the cache instead of returning stale data. The same applies to raw SQL subqueries in `selectRaw`/`addSelect`, `whereRaw`/`havingRaw`/`groupByRaw`, join `ON` clauses, nested `where` blocks, and `whereIn($column, $subquery)`. `morphToMany()` / `morphedByMany()` are still not auto-flushed; call `flushCache()` after those pivot writes.
+- **Dependency limits** — `morphTo` eager loads are keyed and tagged per mapped morph type (via `Relation::morphMap()`); without a morph map they bypass the cache, and every morph type must be registered in the map. Building a `morphTo` key queries the resolved state of every registered morph type, so a large morph map adds CPU work to every read, including cache hits. Opaque subquery sources (`fromSub()`, `joinSub()`, `selectSub()` closures/raw SQL) still cannot be tagged safely; queries using them bypass the cache instead of returning stale data. The same applies to raw SQL subqueries in `selectRaw`/`addSelect`, `whereRaw`/`havingRaw`/`groupByRaw`, join `ON` clauses, nested `where` blocks, and `whereIn($column, $subquery)`. `morphToMany()` / `morphedByMany()` pivot writes are flushed like `belongsToMany()` when the model uses `HasCachedRelationships`; without the trait they stay stale until the TTL expires.
 - **Manual** — `Post::flushModelCache()`, `$post->flushCache()`, or `php artisan mcache:flush`. Inside a transaction these return `true` as soon as the flush is scheduled rather than executed.
 
 ## Stampede prevention

@@ -6,8 +6,9 @@ namespace Daika7ana\LaravelModelCache;
  * Helper trait to flush cache when relationship methods are called.
  *
  * Add it alongside HasCachedQueries: every belongsToMany() relation is then a
- * CachingBelongsToMany, which flushes the parent's cache after attach/detach/
- * sync. The *AndFlushCache() helpers below are legacy sugar for the same thing.
+ * CachingBelongsToMany and every morphToMany()/morphedByMany() a
+ * CachingMorphToMany; both flush the parent's cache after attach/detach/sync.
+ * The *AndFlushCache() helpers below are legacy sugar for the same thing.
  */
 trait HasCachedRelationships
 {
@@ -63,6 +64,49 @@ trait HasCachedRelationships
         }
 
         return $this->$relation()->detach($ids, $touch);
+    }
+
+    /**
+     * Override the morphToMany factory so every polymorphic many-to-many
+     * relation (including morphedByMany, which delegates here) is a
+     * CachingMorphToMany that flushes the cache after attach/detach/sync.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     * @param  \Illuminate\Database\Eloquent\Model  $parent
+     * @param  string  $name
+     * @param  string  $table
+     * @param  string  $foreignPivotKey
+     * @param  string  $relatedPivotKey
+     * @param  string  $parentKey
+     * @param  string  $relatedKey
+     * @param  string|null  $relationName
+     * @param  bool  $inverse
+     * @return \Daika7ana\LaravelModelCache\CachingMorphToMany
+     */
+    protected function newMorphToMany(
+        $query,
+        $parent,
+        $name,
+        $table,
+        $foreignPivotKey,
+        $relatedPivotKey,
+        $parentKey,
+        $relatedKey,
+        $relationName = null,
+        $inverse = false,
+    ) {
+        return new CachingMorphToMany(
+            $query,
+            $parent,
+            $name,
+            $table,
+            $foreignPivotKey,
+            $relatedPivotKey,
+            $parentKey,
+            $relatedKey,
+            $relationName,
+            $inverse,
+        );
     }
 
     /**
