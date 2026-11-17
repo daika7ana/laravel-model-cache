@@ -511,8 +511,8 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
         $this->aggregateSelectExpressions ??= new \SplObjectStorage();
 
         foreach ($this->expressionColumns() as $expression) {
-            if (! $before->contains($expression)) {
-                $this->aggregateSelectExpressions->attach($expression);
+            if (! $before->offsetExists($expression)) {
+                $this->aggregateSelectExpressions->offsetSet($expression);
             }
         }
 
@@ -900,7 +900,7 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
 
         foreach ((array) ($this->query->columns ?? []) as $column) {
             if ($column instanceof \Illuminate\Database\Query\Expression) {
-                $expressions->attach($column);
+                $expressions->offsetSet($column);
             }
         }
 
@@ -1345,7 +1345,6 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
 
         try {
             $property = new \ReflectionProperty($builder, 'afterQueryCallbacks');
-            $property->setAccessible(true);
 
             return ! empty($property->getValue($builder));
         } catch (\Throwable $e) {
@@ -1387,7 +1386,6 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
 
         try {
             $property = new \ReflectionProperty($model, 'cacheMinutes');
-            $property->setAccessible(true);
 
             if (! $property->isInitialized($model)) {
                 return null;
@@ -1680,7 +1678,6 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
 
         try {
             $reflection = new \ReflectionProperty($relation, 'macroBuffer');
-            $reflection->setAccessible(true);
             $macros = $reflection->getValue($relation);
         } catch (\Throwable $e) {
             return;
@@ -1727,11 +1724,11 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
      */
     protected function modelHasUnmappedMorphType($model, \SplObjectStorage $visited): bool
     {
-        if ($visited->contains($model)) {
+        if ($visited->offsetExists($model)) {
             return false;
         }
 
-        $visited->attach($model);
+        $visited->offsetSet($model);
 
         foreach ($model->getRelations() as $name => $related) {
             // Pivot data is stored as a relation but is not a relationship method.
@@ -1800,7 +1797,6 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
 
         try {
             $reflection = new \ReflectionProperty($relation, $property);
-            $reflection->setAccessible(true);
             $values = $reflection->getValue($relation);
 
             return is_array($values) ? ($values[$class] ?? null) : null;
@@ -1877,7 +1873,7 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
         foreach ((array) ($query->columns ?? []) as $column) {
             if ($column instanceof \Illuminate\Database\Query\Expression
                 && $tracked !== null
-                && $tracked->contains($column)) {
+                && $tracked->offsetExists($column)) {
                 continue;
             }
 

@@ -77,13 +77,11 @@ class MorphToFingerprintEquivalenceTest extends TestCase
         $configure($relation);
 
         $method = new \ReflectionMethod(CacheableBuilder::class, 'morphTargetQuery');
-        $method->setAccessible(true);
         [$query, $target] = $method->invoke($builder, $relation, 'tenant_author');
 
         $ids = Comment::where('commentable_type', 'tenant_author')->pluck('commentable_id')->all();
 
         $whereInMethod = new \ReflectionMethod($relation, 'whereInMethod');
-        $whereInMethod->setAccessible(true);
         $whereIn = $whereInMethod->invoke($relation, $target, $target->getKeyName());
 
         $query->{$whereIn}($target->qualifyColumn($target->getKeyName()), $ids);

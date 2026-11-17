@@ -363,7 +363,6 @@ class RegressionTest extends TestCase
 
         $reflection = new \ReflectionClass($builder);
         $prop = $reflection->getProperty('cacheDriver');
-        $prop->setAccessible(true);
 
         // Should be null before first use
         $this->assertNull($prop->getValue($builder));
