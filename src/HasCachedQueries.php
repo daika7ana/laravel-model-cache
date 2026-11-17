@@ -4,11 +4,11 @@ namespace Daika7ana\LaravelModelCache;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
-use Daika7ana\LaravelModelCache\Contracts\CacheableBuilderContract;
 
 /**
  * @property ?int $cacheMinutes
  * @property ?string $cachePrefix
+ * @property ?int $cacheLockSeconds
  */
 trait HasCachedQueries
 {
@@ -169,18 +169,6 @@ trait HasCachedQueries
     }
 
     /**
-     * Allow flushing specific query cache when used directly in a query chain.
-     * This method is intended to be used as:
-     * Model::where('condition', $value)->flushCache();
-     *
-     * @return bool
-     */
-    public function scopeFlushCache(CacheableBuilderContract $query)
-    {
-        return $query->flushQueryCache();
-    }
-
-    /**
      * Flush the cache for this model.
      *
      * @return bool
@@ -229,6 +217,10 @@ trait HasCachedQueries
                     return $result;
                 } catch (\Throwable $e) {
                     $debugger->error("Error flushing cache with tags for model {$modelClass}: {$e->getMessage()}");
+
+                    // A real flush failure is not a missing-tags store — don't
+                    // emit the misleading warning or latch the flag.
+                    return false;
                 }
             }
 

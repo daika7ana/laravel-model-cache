@@ -5,10 +5,9 @@ namespace Daika7ana\LaravelModelCache;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Facades\Cache;
 use Daika7ana\LaravelModelCache\Exceptions\UnfingerprintableEagerLoadException;
 
-class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\Contracts\CacheableBuilderContract
+class CacheableBuilder extends Builder
 {
     /**
      * The number of minutes to cache the query.
@@ -161,16 +160,6 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
      */
     public function firstFromCache($columns = ['*'])
     {
-        // Check if caching is globally disabled
-        if (config('model-cache.enabled', true) === false) {
-            return $this->clone()->take(1)->getWithoutCache($columns)->first();
-        }
-
-        // Check if caching is disabled for this query
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return $this->clone()->take(1)->getWithoutCache($columns)->first();
-        }
-
         $results = $this->clone()->take(1)->getFromCache($columns);
 
         return count($results) > 0 ? $results->first() : null;
@@ -209,8 +198,6 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
         if ($this->shouldBypassCache($minutes)) {
             return $this->getWithoutCache($columns);
         }
-
-        $cache = $this->getCacheDriver();
 
         try {
             return $this->rememberWithLock($cacheKey, $minutes * 60, function () use ($columns) {
@@ -287,7 +274,10 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
         // The base query itself may hide a subquery in a raw column/where/order.
         $this->markUncertainForRawSelect($this->toBase());
 
-        $connection = $this->model->getConnection();
+        // Key off the connection the query actually runs on. getConnection() is
+        // in Eloquent's $passthru, so this is the same Connection (11–13) but
+        // avoids the far slower model->getConnection() path.
+        $connection = $this->getQuery()->getConnection();
 
         // Create unique components for our key
         $keyComponents = [
@@ -295,6 +285,12 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
             get_class($this->model),
             $connection->getName(),
             $connection->getDatabaseName(),
+            // Name + database are not unique across hosts (multi-tenant swaps
+            // the host but often keeps both). Include the endpoint so two
+            // tenants on different servers can't share one cache entry.
+            $connection->getConfig('host'),
+            $connection->getConfig('url'),
+            $connection->getConfig('port'),
             $this->model->getTable(),
             $this->toSql(),
             $this->bindingsFingerprint(),
@@ -374,16 +370,6 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
      */
     public function get($columns = ['*'])
     {
-        // Fast path: caching disabled globally
-        if (config('model-cache.enabled', true) === false) {
-            return parent::get($columns);
-        }
-
-        // Fast path: explicitly disabled for this query
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return $this->getWithoutCache($columns);
-        }
-
         return $this->getFromCache($columns);
     }
 
@@ -399,16 +385,6 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
      */
     public function paginate($perPage = null, $columns = ['*'], $pageName = 'page', $page = null, $total = null)
     {
-        // Fast path: caching disabled globally
-        if (config('model-cache.enabled', true) === false) {
-            return parent::paginate($perPage, $columns, $pageName, $page, $total);
-        }
-
-        // Fast path: explicitly disabled for this query
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return parent::paginate($perPage, $columns, $pageName, $page, $total);
-        }
-
         return $this->paginateFromCache($perPage, $columns, $pageName, $page, $total);
     }
 
@@ -774,7 +750,7 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
      *
      * @param  array  $attributes
      * @param  array|callable  $values
-     * @return bool
+     * @return mixed
      */
     public function updateOrInsert(array $attributes, array|callable $values = [])
     {
@@ -839,6 +815,19 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
     public function insertOrIgnoreUsing(array $columns, $query)
     {
         return $this->flushAfter(parent::insertOrIgnoreUsing($columns, $query), 'insertOrIgnoreUsing');
+    }
+
+    /**
+     * Insert rows, ignoring duplicates, and return the inserted columns. Flushes cache.
+     *
+     * This method is declared on Query\Builder (Laravel 13+) and forwarded here
+     * via Eloquent Builder::__call(); older versions have no such method.
+     *
+     * @return mixed
+     */
+    public function insertOrIgnoreReturning(array $values, array $returning = ['*'], array|string|null $uniqueBy = null)
+    {
+        return $this->flushAfter(parent::insertOrIgnoreReturning($values, $returning, $uniqueBy), 'insertOrIgnoreReturning');
     }
 
     /**
@@ -981,75 +970,109 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
     {
         $this->resultUncacheable = false;
 
-        if (! config('model-cache.use_cache_locks', false)) {
-            $driver = $this->getCacheDriver();
-            $tagged = $cacheTags && $this->supportsTags($driver);
+        $driver = $this->getCacheDriver();
+        $tagged = $cacheTags && $this->supportsTags($driver);
 
+        // Values are stored as a single-element array so a cached null (an
+        // empty-set aggregate) stays distinguishable from a miss: Repository::get()
+        // returns null for both. Returns [true, value] on hit, [false, null] otherwise.
+        $read = function () use ($driver, $tagged, $cacheTags, $cacheKey) {
             try {
                 $cached = $tagged
                     ? $driver->tags($cacheTags)->get($cacheKey)
                     : $driver->get($cacheKey);
-
-                if ($cached !== null) {
-                    resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
-
-                    return $cached;
-                }
             } catch (\Throwable $e) {
-                // Cache read failure is fail-open; execute the query below.
+                if (config('model-cache.debug_mode', false)) {
+                    resolve(ModelCacheDebugger::class)->error("Cache read failed, bypassing cache: {$e->getMessage()}");
+                }
+
+                return [false, null];
             }
 
+            return is_array($cached) && count($cached) === 1 && array_key_exists(0, $cached)
+                ? [true, $cached[0]]
+                : [false, null];
+        };
+
+        // Fingerprint the tag namespace at MISS time, before the query: if a
+        // concurrent flush bumps it while we compute, our result belongs to the
+        // old namespace and must not be planted in the fresh one.
+        // Captured lazily so cache hits — the common path — pay no extra reads.
+        $namespace = null;
+        $namespaceCaptured = false;
+        $captureNamespace = function () use ($driver, $tagged, $cacheTags, &$namespace, &$namespaceCaptured) {
+            if ($namespaceCaptured || ! $tagged) {
+                return;
+            }
+            $namespaceCaptured = true;
+
+            try {
+                $namespace = $driver->tags($cacheTags)->taggedItemKey('');
+            } catch (\Throwable $e) {
+                $namespace = null;
+            }
+        };
+
+        $write = function ($result) use ($driver, $tagged, $cacheTags, $cacheKey, $seconds, &$namespace) {
+            if ($this->resultUncacheable) {
+                return;
+            }
+
+            try {
+                // A namespace change means a flush ran during our query; writing
+                // now would plant a stale value in the fresh namespace.
+                if ($namespace !== null && $namespace !== $driver->tags($cacheTags)->taggedItemKey('')) {
+                    return;
+                }
+
+                $value = [$result];
+                $tagged
+                    ? $driver->tags($cacheTags)->put($cacheKey, $value, $seconds)
+                    : $driver->put($cacheKey, $value, $seconds);
+            } catch (\Throwable $e) {
+                // A failed write must not re-run the query: the computed result
+                // is still correct for this request.
+                if (config('model-cache.debug_mode', false)) {
+                    resolve(ModelCacheDebugger::class)->error("Cache write failed for key {$cacheKey}: {$e->getMessage()}");
+                }
+            }
+        };
+
+        if (! config('model-cache.use_cache_locks', false)) {
+            [$hit, $value] = $read();
+            if ($hit) {
+                resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
+
+                return $value;
+            }
+
+            $captureNamespace();
             resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
             $result = $callback();
-
-            if (! $this->resultUncacheable) {
-                if ($tagged) {
-                    $driver->tags($cacheTags)->put($cacheKey, $result, $seconds);
-                } else {
-                    $driver->put($cacheKey, $result, $seconds);
-                }
-            }
+            $write($result);
 
             return $result;
         }
 
-        $cache = $this->getCacheDriver();
         $lockKey = "stampede:{$cacheKey}";
         $lockDuration = $this->cacheLockSeconds ?? config('model-cache.cache_lock_seconds', 5);
 
-        // Try to get existing cached value first
-        try {
-            if ($cacheTags && $this->supportsTags($cache)) {
-                $cached = $cache->tags($cacheTags)->get($cacheKey);
-            } else {
-                $cached = $cache->get($cacheKey);
-            }
+        [$hit, $value] = $read();
+        if ($hit) {
+            resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
 
-            if ($cached !== null) {
-                resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
-
-                return $cached;
-            }
-        } catch (\Throwable $e) {
-            // Cache miss or error — proceed to lock
+            return $value;
         }
 
-        // Acquire lock to prevent stampede
-        $lock = $cache->lock($lockKey, $lockDuration);
+        $lock = $driver->lock($lockKey, $lockDuration);
 
         if ($lock->get()) {
+            $captureNamespace();
             resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
 
             try {
                 $result = $callback();
-
-                if (! $this->resultUncacheable) {
-                    if ($cacheTags && $this->supportsTags($cache)) {
-                        $cache->tags($cacheTags)->put($cacheKey, $result, $seconds);
-                    } else {
-                        $cache->put($cacheKey, $result, $seconds);
-                    }
-                }
+                $write($result);
 
                 return $result;
             } finally {
@@ -1057,33 +1080,25 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
             }
         }
 
-        // Another request is computing — poll for the result until the lock
-        // duration elapses, then fall back to executing the query directly.
-        $deadline = microtime(true) + $lockDuration;
+        // Another request is computing. Re-read briefly, then execute the query
+        // directly instead of pinning this worker for the whole lock duration.
+        // Bounded by lock_wait_seconds (always <= the lock duration); above it,
+        // lock-based collapse is given up so slow/never-cacheable queries can't
+        // hold every concurrent worker.
+        $maxWait = max(0.0, (float) config('model-cache.lock_wait_seconds', 0.25));
+        $deadline = microtime(true) + min((float) $lockDuration, $maxWait);
 
         while (microtime(true) < $deadline) {
             usleep(50000); // 50ms
 
-            try {
-                $cached = $cacheTags && $this->supportsTags($cache)
-                    ? $cache->tags($cacheTags)->get($cacheKey)
-                    : $cache->get($cacheKey);
-            } catch (\Throwable $e) {
-                // If the re-read fails, just execute the query directly
-                resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
-
-                return $callback();
-            }
-
-            if ($cached !== null) {
+            [$hit, $value] = $read();
+            if ($hit) {
                 resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
 
-                return $cached;
+                return $value;
             }
         }
 
-        // The lock holder is still computing past the lock duration — execute
-        // the query directly instead of returning null to a caller expecting a Collection.
         resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
 
         return $callback();
@@ -1325,6 +1340,27 @@ class CacheableBuilder extends Builder implements \Daika7ana\LaravelModelCache\C
      */
     protected function shouldBypassCache(?int $minutes = null): bool
     {
+        // Cheap state-only checks first; the tag-support check resolves the
+        // cache driver, so run it only if the others don't already bypass.
+        // Reads inside an open transaction must hit the DB: the matching flush
+        // is deferred to commit, so a cache hit would hide the transaction's
+        // own writes, and an uncommitted result could be cached then rolled back.
+        if ($this->getQuery()->getConnection()->transactionLevel() > 0) {
+            return true;
+        }
+
+        // Pessimistic locks are a side effect of the SELECT, not its result.
+        // A cache hit runs no SQL, so the row lock would never be acquired.
+        if ($this->getQuery()->lock !== null) {
+            return true;
+        }
+
+        // A store without tags cannot invalidate what it stores: never cache a
+        // read there, or it would serve stale rows for the whole TTL.
+        if (! $this->supportsTags($this->getCacheDriver())) {
+            return true;
+        }
+
         if ($minutes !== 0
             && ! $this->eagerLoadUnfingerprintable
             && ! $this->queryDependencyUncertain

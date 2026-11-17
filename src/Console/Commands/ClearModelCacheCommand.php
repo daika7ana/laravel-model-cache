@@ -173,42 +173,13 @@ class ClearModelCacheCommand extends Command
      */
     protected function clearModelCacheManually(string $modelClass, string $tableName): bool
     {
-        try {
-            $cache = $this->cacheRepository();
-
-            // Per-model flush must not include the shared 'model_cache' tag:
-            // resetting it would invalidate every cached model.
-            $tags = [$modelClass, $tableName];
-
-            // First try to use tags if supported
-            if ($this->supportsTags($cache)) {
-                try {
-                    $cache->tags($tags)->flush();
-                    $this->components->info("Cache cleared for model: {$modelClass} using tags");
-
-                    return true;
-                } catch (\Throwable $e) {
-                    $this->components->warn('Error using cache tags: ' . $e->getMessage());
-                }
-            }
-
-            // If we reach here, tags are not supported or failed
-            // For simplicity, just confirm and clear all cache
-            if ($this->components->confirm("Your cache driver doesn't support tags or there was an error. Would you like to clear ALL application cache?", false)) {
-                $cache->flush();
-                $this->components->info('All cache cleared successfully');
-
-                return true;
-            }
-
-            $this->components->info('Cache clearing cancelled');
-
-            return false;
-        } catch (\Throwable $e) {
-            $this->components->error('Error clearing cache: ' . $e->getMessage());
-
-            return false;
-        }
+        // Per-model flush must not include the shared 'model_cache' tag:
+        // resetting it would invalidate every cached model.
+        return $this->clearCacheByTags(
+            [$modelClass, $tableName],
+            "model: {$modelClass}",
+            "Your cache driver doesn't support tags or there was an error. Would you like to clear ALL application cache?",
+        );
     }
 
     /**
@@ -216,14 +187,25 @@ class ClearModelCacheCommand extends Command
      */
     protected function clearAllModelCache(): bool
     {
+        return $this->clearCacheByTags(
+            'model_cache',
+            'all models',
+            'Your cache driver doesn\'t support tags. This will clear ALL application cache. Continue?',
+        );
+    }
+
+    /**
+     * Flush the given tag(s), or ask before falling back to a full cache wipe.
+     */
+    protected function clearCacheByTags(array|string $tags, string $label, string $confirmMessage): bool
+    {
         try {
             $cache = $this->cacheRepository();
 
-            // First try to use tags if supported
             if ($this->supportsTags($cache)) {
                 try {
-                    $cache->tags('model_cache')->flush();
-                    $this->components->success('Cache cleared for all models using tags');
+                    $cache->tags($tags)->flush();
+                    $this->components->info("Cache cleared for {$label} using tags");
 
                     return true;
                 } catch (\Throwable $e) {
@@ -231,11 +213,10 @@ class ClearModelCacheCommand extends Command
                 }
             }
 
-            // If we reach here, tags are not supported or failed
-            // Ask for confirmation before clearing all cache
-            if ($this->components->confirm('Your cache driver doesn\'t support tags. This will clear ALL application cache. Continue?', false)) {
+            // Tags unavailable or failed: never wipe the whole cache without consent.
+            if ($this->components->confirm($confirmMessage, false)) {
                 $cache->flush();
-                $this->components->success('All cache cleared successfully');
+                $this->components->info('All cache cleared successfully');
 
                 return true;
             }
