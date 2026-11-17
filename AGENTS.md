@@ -4,7 +4,7 @@ Laravel package (fork of `ymigval/laravel-model-cache`) that caches Eloquent que
 
 ## Commands
 
-- `composer test` — `vendor/bin/phpunit` (Unit + Feature suites; 159 tests, 448 assertions, ~4s). Requires local memcached on 127.0.0.1:11211 (phpunit.xml default); if unavailable, `CACHE_DRIVER=array vendor/bin/phpunit` also passes (array store supports tags since Laravel 11).
+- `composer test` — `vendor/bin/phpunit` (Unit + Feature suites; 223 tests, 592 assertions, ~4s). Requires local memcached on 127.0.0.1:11211 (phpunit.xml default); if unavailable, `CACHE_DRIVER=array vendor/bin/phpunit` also passes (array store supports tags since Laravel 11).
 - `composer check-style` — `vendor/bin/pint --test`. Passes on HEAD. `composer fix-style` — `vendor/bin/pint --dirty` (only touched files); plain `vendor/bin/pint` sweeps the repo.
 - Pint preset is `per`, **not** `laravel` — it enforces `ordered_class_elements`, `function_declaration`, etc. Run `vendor/bin/pint --dirty` after adding test helper methods; a fresh private method mid-class often trips `ordered_class_elements`.
 
@@ -26,7 +26,7 @@ Laravel package (fork of `ymigval/laravel-model-cache`) that caches Eloquent que
 - Transaction deferral: EVERY flush path (builder mass ops, model events, `CachingBelongsToMany`, relationship helper methods) runs `DB::afterCommit($flush)` when `DB::transactionLevel() > 0` — never flush on rollback.
 - Single flush per instance op: the builder flushes then calls `markCacheFlushed($model)`; the event handler checks `consumeCacheFlushMarker()` (deleted/restored) / `hasCacheFlushMarker()` (created/updated, peek-not-clear — restore fires updated then restored) to skip its redundant flush. Identity-based (`===`), so stale markers can't suppress a legit flush.
 - Fail-open: any cache exception falls through to the DB; `model-cache.enabled=false` bypasses caching entirely.
-- Cache key = hash of `prefix|table|sql|bindings|columns|locale?` plus eager-load names; `json_encode` everywhere, including paginate columns (do NOT reintroduce `serialize`). Algorithm from `model-cache.hash_algorithm` (default `xxh128`), validated at boot in `ModelCacheServiceProvider`; runtime `hash()` failures surface as `InvalidArgumentException`, not `ValueError`.
+- Cache key = hash of `prefix|table|sql|bindings|columns|locale?` plus eager-load names; bindings/columns are fingerprinted with PHP `serialize()` (lossless, binary-safe; `Expression` → raw SQL) — keep it, `json_encode` is not binary-safe. Algorithm from `model-cache.hash_algorithm` (default `xxh128`), validated at boot in `ModelCacheServiceProvider`; runtime `hash()` failures surface as `InvalidArgumentException`, not `ValueError`.
 - Stampede prevention (`model-cache.use_cache_locks`): `rememberWithLock` re-reads the cache every 50ms until the lock duration (`$cacheLockSeconds` ?? config, default 5s) elapses, then falls back to executing the query. Lock key is `stampede:{cacheKey}`; a null re-read must never be returned to `Collection`-typed methods.
 - Per-model props: `$cacheMinutes`, `$cachePrefix`, `$cacheLockSeconds`. Chain API: `remember()`, `withoutCache()`, `flushCache()`, `paginateFromCache(..., $total)` (`$total` enters the cache key only when non-null), explicit `getFromCache()`/`firstFromCache()`. `touch()` returns `int|false`.
 - `HasCachedRelationships` (or `HasCacheableModel` = both traits) overrides `belongsToMany()` → `CachingBelongsToMany`, which flushes after attach/detach/sync/syncWithoutDetaching/updateExistingPivot (gated on actual pivot changes). Only `CacheableBuilderContract` remains in `src/Contracts/` (consumed by `scopeFlushCache`); `HasCachedQueriesContract` was deleted.
@@ -35,7 +35,7 @@ Laravel package (fork of `ymigval/laravel-model-cache`) that caches Eloquent que
 ## Contributing workflow (this fork)
 
 - Base branch is `fork` (tracks `origin/fork`; `origin/main` exists but PRs go to `fork`). Changes go on `fix/...` branches with ONE commit per change, squash-merged via `gh pr merge N --squash --delete-branch`, then `git checkout fork && git pull --ff-only && git fetch --prune`.
-- The user tests manually between changes; push/PR is requested explicitly. `AGENTS.md` and `FINDINGS.md` are scratch files — never commit them, never mention them in PRs. Commit style: `fix: ...` / `feat: ...` / `refactor: ...` / `test: ...`.
+- The user tests manually between changes; push/PR is requested explicitly. `FINDINGS.md` is a scratch file — never commit it, never mention it in PRs. `AGENTS.md` is tracked. Commit style: `fix: ...` / `feat: ...` / `refactor: ...` / `test: ...`.
 - Laravel 11/12 compatibility is source-verified only (local vendor is pinned to 13.23.0): keep overrides signature-compatible with 11.x/12.x — don't type-hint parameters vendor widened later (e.g., `touch($column)` is `array|string|null` in 12.x), and keep `belongsToMany()` at exactly 7 params (no `$inverse` in 11/12/13).
 
 ## Layout
