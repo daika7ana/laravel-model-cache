@@ -257,20 +257,6 @@ trait HasCachedQueries
      */
     protected static function getStaticCacheDriver()
     {
-        try {
-            $cacheStore = config('model-cache.cache_store');
-
-            if ($cacheStore) {
-                return \Illuminate\Support\Facades\Cache::store($cacheStore);
-            }
-
-            return \Illuminate\Support\Facades\Cache::store();
-        } catch (\Throwable $e) {
-            // If there's an issue with the configured cache driver,
-            // fall back to the default driver
-            resolve(ModelCacheDebugger::class)->error("Error getting cache driver: {$e->getMessage()}");
-
-            return \Illuminate\Support\Facades\Cache::store(config('cache.default'));
-        }
+        return CacheStoreResolver::resolve();
     }
 }

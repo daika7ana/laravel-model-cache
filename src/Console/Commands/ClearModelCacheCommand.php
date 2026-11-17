@@ -5,7 +5,7 @@ namespace Daika7ana\LaravelModelCache\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Cache;
+use Daika7ana\LaravelModelCache\CacheStoreResolver;
 use ReflectionMethod;
 use Symfony\Component\Console\Command\Command as CommandAlias;
 
@@ -137,14 +137,7 @@ class ClearModelCacheCommand extends Command
      */
     protected function storeSupportsTags(): bool
     {
-        try {
-            $store = config('model-cache.cache_store') ?: config('cache.default');
-            $cache = Cache::store($store);
-
-            return method_exists($cache, 'supportsTags') && $cache->supportsTags();
-        } catch (\Throwable $e) {
-            return false;
-        }
+        return $this->supportsTags($this->cacheRepository());
     }
 
     /**
@@ -274,8 +267,6 @@ class ClearModelCacheCommand extends Command
      */
     protected function cacheRepository(): Repository
     {
-        $cacheStore = config('model-cache.cache_store');
-
-        return $cacheStore ? Cache::store($cacheStore) : Cache::store();
+        return CacheStoreResolver::resolve();
     }
 }

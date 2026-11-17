@@ -148,7 +148,7 @@ class CachingBelongsToMany extends BelongsToMany
     protected function flushPivotTag(): void
     {
         try {
-            $cache = \Illuminate\Support\Facades\Cache::store(config('model-cache.cache_store') ?: null);
+            $cache = CacheStoreResolver::resolve();
 
             if (method_exists($cache, 'supportsTags') && $cache->supportsTags()) {
                 $cache->tags([$this->getTable()])->flush();
