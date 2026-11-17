@@ -34,7 +34,7 @@ Laravel package (fork of `ymigval/laravel-model-cache`) that caches Eloquent que
 
 ## Contributing workflow (this fork)
 
-- Base branch is `fork` (tracks `origin/fork`; `origin/main` exists but PRs go to `fork`). Changes go on `fix/...` branches with ONE commit per change, squash-merged via `gh pr merge N --squash --delete-branch`, then `git checkout fork && git pull --ff-only && git fetch --prune`.
+- Base branch is `master` (the only remote branch). Changes go on a `fix/...` or `refactor/...` branch with ONE commit per logical change, squash-merged via `gh pr merge N --squash --delete-branch`, then `git checkout master && git pull --ff-only && git fetch --prune`.
 - The user tests manually between changes; push/PR is requested explicitly. `FINDINGS.md` is a scratch file — never commit it, never mention it in PRs. `AGENTS.md` is tracked. Commit style: `fix: ...` / `feat: ...` / `refactor: ...` / `test: ...`.
 - Laravel 11/12 compatibility is source-verified only (local vendor is pinned to 13.23.0): keep overrides signature-compatible with 11.x/12.x — don't type-hint parameters vendor widened later (e.g., `touch($column)` is `array|string|null` in 12.x), and keep `belongsToMany()` at exactly 7 params (no `$inverse` in 11/12/13).
 
