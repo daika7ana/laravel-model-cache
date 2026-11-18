@@ -4,6 +4,8 @@ All notable changes to `laravel-model-cache` will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-18
+
 ### Added
 - `model-cache.lock_wait_seconds` / `MODEL_CACHE_LOCK_WAIT_SECONDS` (default 0.25s) caps how long a stampede waiter re-reads the cache before running the query itself.
 - `exists()` and `doesntExist()` now read and write the cache like other builder methods, with a key distinct from `get()`; a cached `false` is a hit, and `doesntExist()` reuses the same entry.
