@@ -8,6 +8,7 @@ With `HasCachedQueries` on a model, these calls read (and write) the cache:
 
 - `get()` — and everything built on it: `first()`, `find()`, `findOrFail()`, `firstOrFail()`, `chunk()` (per page), `simplePaginate()`
 - `count()`, `sum()`, `max()`, `min()`, `avg()` (and `average()`)
+- `exists()` (and `doesntExist()`, which reuses the cached `exists()` entry) — cached as a boolean, including `false`
 - `paginate()` — cached as a single key (count + items together)
 
 Aggregates are cached including a `null` result, so `max()`/`min()`/`avg()` on an empty set is served from cache as a hit rather than re-queried.
@@ -22,7 +23,8 @@ Reads go straight to the database (no cache write, no cache read) when:
 
 - the resolved cache store does not support tags — it could never invalidate what it stored;
 - a database transaction is open on the query's connection (`transactionLevel() > 0`) — the matching flush is deferred to commit, so a cache hit would hide the transaction's own writes and an uncommitted result could be cached then rolled back;
-- the query uses `lockForUpdate()` / `sharedLock()` — a cache hit runs no SQL, so the row lock would never be acquired.
+- the query uses `lockForUpdate()` / `sharedLock()` — a cache hit runs no SQL, so the row lock would never be acquired;
+- the query uses `inRandomOrder()` (including inside an eager load) — caching would freeze one random ordering for the whole TTL, so every call re-queries.
 
 The other bypass conditions (raw expressions and opaque subqueries, unmapped `morphTo`, `afterQuery()` callbacks, unfingerprintable bindings) are listed under [Cache keys](#cache-keys).
 
@@ -39,6 +41,7 @@ All methods below are available on query chains (`Post::where(...)->method()`). 
 | `withoutCache()` | Disables caching for this chain (sets `cacheMinutes = 0`). |
 | `paginateFromCache($perPage = null, $columns = ['*'], $pageName = 'page', $page = null, $total = null)` | Cached length-aware paginator. A non-null `$total` overrides the total count and changes the cache key. |
 | `countFromCache($columns = '*')` | Cached count (int). |
+| `exists()` / `doesntExist()` | Cached boolean existence check; `false` is cached as a hit, and `doesntExist()` reuses the same entry. |
 | `sumFromCache($column)` / `maxFromCache($column)` / `minFromCache($column)` / `avgFromCache($column)` | Cached aggregates. |
 | `getCacheKey($columns = ['*'])` | The cache key this chain would use (handy for debugging). |
 | `flushCache($columns = ['*'])` (alias `flushQueryCache`) | Flushes this exact query's key, then the model's tags. Callable in a chain: `Post::where('published', true)->flushCache()`. |

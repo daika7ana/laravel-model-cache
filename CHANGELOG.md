@@ -6,6 +6,7 @@ All notable changes to `laravel-model-cache` will be documented in this file.
 
 ### Added
 - `model-cache.lock_wait_seconds` / `MODEL_CACHE_LOCK_WAIT_SECONDS` (default 0.25s) caps how long a stampede waiter re-reads the cache before running the query itself.
+- `exists()` and `doesntExist()` now read and write the cache like other builder methods, with a key distinct from `get()`; a cached `false` is a hit, and `doesntExist()` reuses the same entry.
 
 ### Changed
 - **BREAKING:** dropped PHP 8.2 (EOL 31 Dec 2026); the package now requires PHP `^8.3` and CI tests 8.3/8.4/8.5. Laravel 11/12/13 support is unchanged.
@@ -13,6 +14,7 @@ All notable changes to `laravel-model-cache` will be documented in this file.
 - Cache keys now include connection identity (host/url/port) and cached values are wrapped to distinguish a stored `null`; existing entries will miss once after upgrading.
 
 ### Fixed
+- `inRandomOrder()` queries (including random ordering inside an eager load) now bypass the cache so each call gets a fresh random order instead of a frozen one.
 - Reads on cache stores without tag support now bypass the cache entirely — previously results were cached but never invalidated.
 - Reads inside an open database transaction now bypass the cache, so read-your-own-writes works and uncommitted rows are never cached.
 - `lockForUpdate()` / `sharedLock()` queries now bypass the cache, so the row lock is actually taken.
