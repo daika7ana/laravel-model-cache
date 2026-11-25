@@ -1286,6 +1286,20 @@ class CacheableBuilder extends Builder
             return parent::{$method}($column);
         }
 
+        // Reads inside a transaction or behind a lock must hit the DB anyway;
+        // bail before the expensive key/eager-load resolution.
+        if ($this->shouldHitDatabase()) {
+            return parent::{$method}($column);
+        }
+
+        // Base aggregates run through the base query's get(), which applies
+        // base-level afterQuery() callbacks; caching would freeze the mutated
+        // value. Eloquent-level callbacks never run on aggregates, so a read
+        // registering only those still caches.
+        if ($this->builderHasAfterQueryCallbacks($this->getQuery())) {
+            return parent::{$method}($column);
+        }
+
         $cacheKey = $this->getCacheKey([$method, $column], false);
         $cacheTags = $this->getCacheTags();
         $minutes = $this->effectiveCacheMinutes();
@@ -1543,11 +1557,14 @@ class CacheableBuilder extends Builder
     }
 
     /**
-     * Whether the builder has any afterQuery() callbacks.
+     * Whether the builder has any afterQuery() callbacks. Both the Eloquent
+     * builder and the base query can register them, and both levels run on
+     * get()/pluck().
      */
     protected function hasAfterQueryCallbacks(): bool
     {
-        return $this->builderHasAfterQueryCallbacks($this);
+        return $this->builderHasAfterQueryCallbacks($this)
+            || $this->builderHasAfterQueryCallbacks($this->getQuery());
     }
 
     /**

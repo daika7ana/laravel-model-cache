@@ -697,4 +697,27 @@ class FunctionalCoverageTest extends TestCase
         $this->assertSame(2, $after, 'insertUsing() must invalidate the cached count');
         $this->assertGreaterThan(0, $queries);
     }
+
+    #[Test]
+    public function it_bypasses_cache_for_after_query_callbacks_registered_on_the_base_query()
+    {
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+
+        $make = function () {
+            $builder = Post::query();
+            $builder->getQuery()->afterQuery(fn($results) => $results);
+
+            return $builder;
+        };
+
+        $make()->get();
+        $make()->count();
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $make()->get();
+        $make()->count();
+
+        $this->assertCount(2, DB::getQueryLog(), 'Base-level afterQuery() callbacks must bypass the cache for get() and aggregates');
+    }
 }
