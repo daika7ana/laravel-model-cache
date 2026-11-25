@@ -181,6 +181,20 @@ class FunctionalCoverageTest extends TestCase
     }
 
     #[Test]
+    public function it_does_not_double_cache_paginates_nested_row_query()
+    {
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+
+        Post::paginate(2);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        Post::forPage(1, 2)->get();
+
+        $this->assertCount(1, DB::getQueryLog(), "paginate()'s nested row read must not also be cached under the plain get() key");
+    }
+
+    #[Test]
     public function it_keeps_paginator_links_per_request_path()
     {
         for ($i = 1; $i <= 3; $i++) {

@@ -462,7 +462,17 @@ class CacheableBuilder extends Builder
         }
 
         $callback = function () use ($perPage, $columns, $pageName, $page, $total) {
-            $result = parent::paginate($perPage, $columns, $pageName, $page, $total);
+            // parent::paginate() fetches rows through a nested $this->get();
+            // cacheMinutes = 0 keeps that inner read from building its own key
+            // and writing the page's rows a second time.
+            $originalMinutes = $this->cacheMinutes;
+            $this->cacheMinutes = 0;
+
+            try {
+                $result = parent::paginate($perPage, $columns, $pageName, $page, $total);
+            } finally {
+                $this->cacheMinutes = $originalMinutes;
+            }
 
             if ($this->hasMorphDependency && $this->resultHasUnmappedMorphType($result)) {
                 $this->resultUncacheable = true;
