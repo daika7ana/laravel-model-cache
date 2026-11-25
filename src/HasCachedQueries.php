@@ -55,7 +55,6 @@ trait HasCachedQueries
      * This method registers event handlers for individual model operations that trigger Eloquent events:
      * - created: When a new model is created via Model::create() or $model->save() on a new instance
      * - updated: When an existing model is updated via $model->save() or $model->update()
-     * - saved: When a model is created or updated via $model->save()
      * - deleted: When a model is deleted via $model->delete()
      * - restored: When a soft-deleted model is restored via $model->restore()
      *
