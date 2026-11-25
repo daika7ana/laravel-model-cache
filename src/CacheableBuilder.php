@@ -173,24 +173,12 @@ class CacheableBuilder extends Builder
      */
     public function getFromCache($columns = ['*']): Collection
     {
-        if (config('model-cache.enabled', true) === false) {
+        if ($this->shouldReadFromDatabase()) {
             return $this->getWithoutCache($columns);
         }
 
-        // Check if caching is disabled for this query
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return $this->getWithoutCache($columns);
-        }
-
-        // Reads inside a transaction or behind a lock must hit the DB anyway;
-        // bail before the expensive key/eager-load resolution.
-        if ($this->shouldHitDatabase()) {
-            return $this->getWithoutCache($columns);
-        }
-
-        // Base-query afterQuery() callbacks mutate the result after the query
-        // runs. Caching that mutated result would leak it into plain queries, so
-        // such queries stay uncached.
+        // afterQuery() callbacks at either level mutate the result after the
+        // query runs; caching it would leak the mutation into plain queries.
         if ($this->hasAfterQueryCallbacks()) {
             return $this->getWithoutCache($columns);
         }
@@ -344,17 +332,13 @@ class CacheableBuilder extends Builder
     {
         $connection = $this->model->getConnection();
 
-        // Defer until the transaction commits so a rollback never invalidates cache.
         // The deferred callback must flush directly: the testing transactions manager
         // runs afterCommit() callbacks immediately while its wrapping transaction is
         // still open, so re-entering flushQueryCache() here would recurse forever.
-        if ($connection->transactionLevel() > 0) {
-            $connection->afterCommit(fn() => $this->performQueryCacheFlush($columns));
-
-            return true;
-        }
-
-        return $this->performQueryCacheFlush($columns);
+        return HasCachedQueries::deferFlushUntilCommit(
+            $connection,
+            fn() => $this->performQueryCacheFlush($columns),
+        );
     }
 
     /**
@@ -406,22 +390,7 @@ class CacheableBuilder extends Builder
      */
     public function paginateFromCache($perPage = null, $columns = ['*'], $pageName = 'page', $page = null, $total = null)
     {
-        if (config('model-cache.enabled', true) === false) {
-            return parent::paginate($perPage, $columns, $pageName, $page, $total);
-        }
-
-        // Fast path: explicitly disabled for this query
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return parent::paginate($perPage, $columns, $pageName, $page, $total);
-        }
-
-        // Reads inside a transaction or behind a lock must hit the DB anyway;
-        // bail before the expensive key/eager-load resolution.
-        if ($this->shouldHitDatabase()) {
-            return parent::paginate($perPage, $columns, $pageName, $page, $total);
-        }
-
-        if ($this->hasAfterQueryCallbacks()) {
+        if ($this->shouldReadFromDatabase() || $this->hasAfterQueryCallbacks()) {
             return parent::paginate($perPage, $columns, $pageName, $page, $total);
         }
 
@@ -621,21 +590,7 @@ class CacheableBuilder extends Builder
      */
     public function pluckFromCache($column, $key = null)
     {
-        if (config('model-cache.enabled', true) === false) {
-            return parent::pluck($column, $key);
-        }
-
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return parent::pluck($column, $key);
-        }
-
-        // Reads inside a transaction or behind a lock must hit the DB anyway;
-        // bail before the expensive key/eager-load resolution.
-        if ($this->shouldHitDatabase()) {
-            return parent::pluck($column, $key);
-        }
-
-        if ($this->hasAfterQueryCallbacks()) {
+        if ($this->shouldReadFromDatabase() || $this->hasAfterQueryCallbacks()) {
             return parent::pluck($column, $key);
         }
 
@@ -682,17 +637,7 @@ class CacheableBuilder extends Builder
      */
     public function exists()
     {
-        if (config('model-cache.enabled', true) === false) {
-            return parent::exists();
-        }
-
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return parent::exists();
-        }
-
-        // Reads inside a transaction or behind a lock must hit the DB anyway;
-        // bail before the expensive key/eager-load resolution.
-        if ($this->shouldHitDatabase()) {
+        if ($this->shouldReadFromDatabase()) {
             return parent::exists();
         }
 
@@ -1274,6 +1219,24 @@ class CacheableBuilder extends Builder
     }
 
     /**
+     * Whether this read must skip the cache before any key work happens:
+     * caching is disabled globally or for this query, or the read is bound
+     * for the database regardless (open transaction or pessimistic lock).
+     */
+    protected function shouldReadFromDatabase(): bool
+    {
+        if (config('model-cache.enabled', true) === false) {
+            return true;
+        }
+
+        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
+            return true;
+        }
+
+        return $this->shouldHitDatabase();
+    }
+
+    /**
      * Execute an aggregate query with caching support.
      *
      * @param  string  $method  The aggregate method name (count, sum, min, max, avg)
@@ -1282,26 +1245,11 @@ class CacheableBuilder extends Builder
      */
     protected function aggregateFromCache(string $method, string $column)
     {
-        if (config('model-cache.enabled', true) === false) {
-            return parent::{$method}($column);
-        }
-
-        // Explicit cache bypass for this query
-        if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
-            return parent::{$method}($column);
-        }
-
-        // Reads inside a transaction or behind a lock must hit the DB anyway;
-        // bail before the expensive key/eager-load resolution.
-        if ($this->shouldHitDatabase()) {
-            return parent::{$method}($column);
-        }
-
         // Base aggregates run through the base query's get(), which applies
         // base-level afterQuery() callbacks; caching would freeze the mutated
         // value. Eloquent-level callbacks never run on aggregates, so a read
         // registering only those still caches.
-        if ($this->builderHasAfterQueryCallbacks($this->getQuery())) {
+        if ($this->shouldReadFromDatabase() || $this->builderHasAfterQueryCallbacks($this->getQuery())) {
             return parent::{$method}($column);
         }
 
@@ -1385,11 +1333,7 @@ class CacheableBuilder extends Builder
             }
         };
 
-        if ($connection->transactionLevel() > 0) {
-            $connection->afterCommit($flush);
-        } else {
-            $flush();
-        }
+        HasCachedQueries::deferFlushUntilCommit($connection, $flush);
     }
 
     /**

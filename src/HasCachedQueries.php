@@ -98,11 +98,7 @@ trait HasCachedQueries
                     $debugger->info("Cache flushed after `{$event}` for model: " . get_class($model));
                 };
 
-                if ($connection->transactionLevel() > 0) {
-                    $connection->afterCommit($flush);
-                } else {
-                    $flush();
-                }
+                static::deferFlushUntilCommit($connection, $flush);
             });
         }
     }
@@ -147,6 +143,22 @@ trait HasCachedQueries
     }
 
     /**
+     * Run the flush now, or once $connection's open transaction commits so a
+     * rollback never flushes. True when deferred; otherwise the flush's own
+     * result.
+     */
+    public static function deferFlushUntilCommit(Connection $connection, \Closure $flush): bool
+    {
+        if ($connection->transactionLevel() > 0) {
+            $connection->afterCommit($flush);
+
+            return true;
+        }
+
+        return (bool) $flush();
+    }
+
+    /**
      * Static method to flush cache for the model.
      * This allows calling Model::flushModelCache() directly without an instance.
      *
@@ -164,13 +176,10 @@ trait HasCachedQueries
         // The deferred callback must flush directly: the testing transactions manager
         // runs afterCommit() callbacks immediately while its wrapping transaction is
         // still open, so re-entering flushModelCache() here would recurse forever.
-        if ($connection->transactionLevel() > 0) {
-            $connection->afterCommit(static fn() => static::performModelCacheFlush($operation));
-
-            return true;
-        }
-
-        return static::performModelCacheFlush($operation);
+        return static::deferFlushUntilCommit(
+            $connection,
+            static fn() => static::performModelCacheFlush($operation),
+        );
     }
 
     /**
