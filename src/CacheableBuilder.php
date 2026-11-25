@@ -740,6 +740,8 @@ class CacheableBuilder extends Builder
      * Random ordering must not be frozen into a cache entry: every call needs a
      * fresh order. Reuse the per-query cacheMinutes bypass rather than adding a
      * dedicated flag, since each builder instance already carries its own TTL.
+     * The bypass is unconditional because a seed only stabilises RAND() on
+     * MySQL; other drivers ignore it and stay random.
      *
      * @param  string  $seed
      * @return $this
