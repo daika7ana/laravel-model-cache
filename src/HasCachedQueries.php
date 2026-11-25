@@ -2,6 +2,7 @@
 
 namespace Daika7ana\LaravelModelCache;
 
+use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 
@@ -78,7 +79,11 @@ trait HasCachedQueries
 
         foreach (['created', 'updated', 'deleted', 'restored'] as $event) {
             static::registerModelEvent($event, function (Model $model) use ($event, $debugger) {
-                $flush = function () use ($model, $event, $debugger) {
+                // Defer flush until this model's own connection commits, so a
+                // rollback (or a transaction on another connection) never flushes.
+                $connection = $model->getConnection();
+
+                $flush = function () use ($model, $event, $debugger, $connection) {
                     // The builder override just flushed this exact instance — skip the
                     // redundant event-side flush.
                     if (in_array($event, ['deleted', 'restored'], true)) {
@@ -89,13 +94,9 @@ trait HasCachedQueries
                         return;
                     }
 
-                    static::flushModelCache($event);
+                    static::flushModelCache($event, $connection);
                     $debugger->info("Cache flushed after `{$event}` for model: " . get_class($model));
                 };
-
-                // Defer flush until this model's own connection commits, so a
-                // rollback (or a transaction on another connection) never flushes.
-                $connection = $model->getConnection();
 
                 if ($connection->transactionLevel() > 0) {
                     $connection->afterCommit($flush);
@@ -149,13 +150,17 @@ trait HasCachedQueries
      * Static method to flush cache for the model.
      * This allows calling Model::flushModelCache() directly without an instance.
      *
+     * @param  string|null  $operation
+     * @param  \Illuminate\Database\Connection|null  $connection  The connection the write ran on; deferral keys off it. Static callers without one fall back to the model's default connection.
      * @return bool
      */
-    public static function flushModelCache(?string $operation = null): bool
+    public static function flushModelCache(?string $operation = null, ?Connection $connection = null): bool
     {
-        $connection = (new static())->getConnection();
+        // Defer until the connection the write ran on commits, so a rollback
+        // never invalidates cache. A static call has no instance to consult,
+        // so it can only guess the model's default connection.
+        $connection ??= (new static())->getConnection();
 
-        // Defer until the model's connection commits so a rollback never invalidates cache.
         // The deferred callback must flush directly: the testing transactions manager
         // runs afterCommit() callbacks immediately while its wrapping transaction is
         // still open, so re-entering flushModelCache() here would recurse forever.
@@ -175,7 +180,7 @@ trait HasCachedQueries
      */
     public function flushCache()
     {
-        return self::flushModelCache();
+        return self::flushModelCache(null, $this->getConnection());
     }
 
     /**

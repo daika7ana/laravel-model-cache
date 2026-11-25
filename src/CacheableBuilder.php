@@ -1303,9 +1303,14 @@ class CacheableBuilder extends Builder
      */
     protected function flushModelOrQueryCache(?string $operation = null): void
     {
-        $flush = function () use ($operation) {
+        // The write ran on the model instance's connection; the deferred flush
+        // must key off it, not the class-default connection a static call
+        // inside flushModelCache() would guess.
+        $connection = $this->model->getConnection();
+
+        $flush = function () use ($operation, $connection) {
             if (method_exists($this->model, 'flushModelCache')) {
-                $this->model->flushModelCache($operation);
+                $this->model->flushModelCache($operation, $connection);
 
                 // Instance operations (delete/forceDelete) run through this builder first
                 // and then fire the `deleted` event; mark the instance so the event handler
@@ -1317,8 +1322,6 @@ class CacheableBuilder extends Builder
                 $this->flushQueryCache();
             }
         };
-
-        $connection = $this->model->getConnection();
 
         if ($connection->transactionLevel() > 0) {
             $connection->afterCommit($flush);
