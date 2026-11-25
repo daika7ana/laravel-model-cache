@@ -40,6 +40,13 @@ class CacheableBuilder extends Builder
     protected $cacheLockSeconds;
 
     /**
+     * Memoized debugger so the hot read path resolves the container once.
+     *
+     * @var ModelCacheDebugger|null
+     */
+    protected $debugger;
+
+    /**
      * Memoized eager-load constraint fingerprints, keyed by closure instance.
      * A WeakMap auto-evicts entries when a closure is freed (e.g. after
      * without()/withOnly()), so a reused object id can never return a stale
@@ -179,6 +186,12 @@ class CacheableBuilder extends Builder
 
         // Check if caching is disabled for this query
         if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
+            return $this->getWithoutCache($columns);
+        }
+
+        // Reads inside a transaction or behind a lock must hit the DB anyway;
+        // bail before the expensive key/eager-load resolution.
+        if ($this->shouldHitDatabase()) {
             return $this->getWithoutCache($columns);
         }
 
@@ -409,6 +422,12 @@ class CacheableBuilder extends Builder
             return parent::paginate($perPage, $columns, $pageName, $page, $total);
         }
 
+        // Reads inside a transaction or behind a lock must hit the DB anyway;
+        // bail before the expensive key/eager-load resolution.
+        if ($this->shouldHitDatabase()) {
+            return parent::paginate($perPage, $columns, $pageName, $page, $total);
+        }
+
         if ($this->hasAfterQueryCallbacks()) {
             return parent::paginate($perPage, $columns, $pageName, $page, $total);
         }
@@ -607,6 +626,12 @@ class CacheableBuilder extends Builder
             return parent::pluck($column, $key);
         }
 
+        // Reads inside a transaction or behind a lock must hit the DB anyway;
+        // bail before the expensive key/eager-load resolution.
+        if ($this->shouldHitDatabase()) {
+            return parent::pluck($column, $key);
+        }
+
         if ($this->hasAfterQueryCallbacks()) {
             return parent::pluck($column, $key);
         }
@@ -659,6 +684,12 @@ class CacheableBuilder extends Builder
         }
 
         if (isset($this->cacheMinutes) && $this->cacheMinutes === 0) {
+            return parent::exists();
+        }
+
+        // Reads inside a transaction or behind a lock must hit the DB anyway;
+        // bail before the expensive key/eager-load resolution.
+        if ($this->shouldHitDatabase()) {
             return parent::exists();
         }
 
@@ -1162,13 +1193,13 @@ class CacheableBuilder extends Builder
         if (! config('model-cache.use_cache_locks', false)) {
             [$hit, $value] = $read();
             if ($hit) {
-                resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
+                $this->cacheDebugger()->debug("Cache hit for key: {$cacheKey}");
 
                 return $value;
             }
 
             $captureNamespace();
-            resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
+            $this->cacheDebugger()->debug("Cache miss, executing query for key: {$cacheKey}");
             $result = $callback();
             $write($result);
 
@@ -1180,7 +1211,7 @@ class CacheableBuilder extends Builder
 
         [$hit, $value] = $read();
         if ($hit) {
-            resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
+            $this->cacheDebugger()->debug("Cache hit for key: {$cacheKey}");
 
             return $value;
         }
@@ -1189,7 +1220,7 @@ class CacheableBuilder extends Builder
 
         if ($lock->get()) {
             $captureNamespace();
-            resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
+            $this->cacheDebugger()->debug("Cache miss, executing query for key: {$cacheKey}");
 
             try {
                 $result = $callback();
@@ -1214,15 +1245,27 @@ class CacheableBuilder extends Builder
 
             [$hit, $value] = $read();
             if ($hit) {
-                resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
+                $this->cacheDebugger()->debug("Cache hit for key: {$cacheKey}");
 
                 return $value;
             }
         }
 
-        resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
+        $this->cacheDebugger()->debug("Cache miss, executing query for key: {$cacheKey}");
 
         return $callback();
+    }
+
+    /**
+     * Whether this read must run against the database regardless of cache
+     * state: inside a transaction (read-your-own-writes, nothing uncommitted
+     * may be cached) or behind a pessimistic lock. Checked before the cache
+     * key is built so those reads skip that work entirely.
+     */
+    protected function shouldHitDatabase(): bool
+    {
+        return $this->getQuery()->getConnection()->transactionLevel() > 0
+            || $this->getQuery()->lock !== null;
     }
 
     /**
@@ -2636,6 +2679,14 @@ class CacheableBuilder extends Builder
         $this->queryDependencyUncertain = true;
 
         return null;
+    }
+
+    /**
+     * Memoized debugger so the hot read path resolves the container once.
+     */
+    protected function cacheDebugger(): ModelCacheDebugger
+    {
+        return $this->debugger ??= resolve(ModelCacheDebugger::class);
     }
 
     /**

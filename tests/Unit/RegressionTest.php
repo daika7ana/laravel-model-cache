@@ -263,6 +263,20 @@ class RegressionTest extends TestCase
         $this->assertNotEmpty($logger->records, 'Debug mode must produce log output');
     }
 
+    #[Test]
+    public function it_skips_cache_key_computation_for_reads_inside_transactions()
+    {
+        config()->set('model-cache.debug_mode', true);
+        $logger = $this->installLogRecorder();
+
+        DB::transaction(function () {
+            Post::where('published', true)->get();
+        });
+
+        $keyLogs = array_filter($logger->records, fn($record) => str_contains($record[1], 'Generated cache key'));
+        $this->assertSame([], $keyLogs, 'A transactional read must hit the DB before any cache key is built');
+    }
+
     // ========== 6. Debugger config not cached ==========
 
     #[Test]
