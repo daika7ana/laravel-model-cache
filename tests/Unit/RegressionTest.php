@@ -263,6 +263,28 @@ class RegressionTest extends TestCase
         $this->assertNotEmpty($logger->records, 'Debug mode must produce log output');
     }
 
+    #[Test]
+    public function it_skips_cache_key_computation_for_reads_inside_transactions()
+    {
+        config()->set('model-cache.debug_mode', true);
+        $logger = $this->installLogRecorder();
+
+        $reads = [
+            fn() => Post::where('published', true)->get(),
+            fn() => Post::where('published', true)->paginate(5),
+            fn() => Post::where('published', true)->pluck('title'),
+            fn() => Post::where('published', true)->exists(),
+            fn() => Post::where('published', true)->count(),
+        ];
+
+        foreach ($reads as $read) {
+            DB::transaction($read);
+        }
+
+        $keyLogs = array_filter($logger->records, fn($record) => str_contains($record[1], 'Generated cache key'));
+        $this->assertSame([], $keyLogs, 'Every read path must hit the DB inside a transaction before any cache key is built');
+    }
+
     // ========== 6. Debugger config not cached ==========
 
     #[Test]
@@ -479,7 +501,7 @@ class RegressionTest extends TestCase
     public function a_failed_tag_flush_does_not_emit_the_missing_tags_warning()
     {
         // Reset the once-per-class warning latch so this test is independent.
-        $warned = new \ReflectionProperty(\Daika7ana\LaravelModelCache\HasCachedQueries::class, 'warnedMissingTags');
+        $warned = new \ReflectionProperty(Post::class, 'warnedMissingTags');
         $warned->setValue(false);
 
         // A concrete Repository mock (supportsTags is a real method) whose

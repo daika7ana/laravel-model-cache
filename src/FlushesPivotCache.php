@@ -109,9 +109,14 @@ trait FlushesPivotCache
      */
     protected function flushCache($operation)
     {
-        $flush = function () use ($operation) {
+        // Pivot writes go through newPivotStatement(), which uses the related
+        // model's builder/connection — not the parent's. Defer on that same
+        // connection so a rollback on it never leaves a stale cache behind.
+        $connection = $this->getQuery()->getConnection();
+
+        $flush = function () use ($operation, $connection) {
             if (method_exists($this->parent, 'flushModelCache')) {
-                $this->parent->flushModelCache();
+                $this->parent->flushModelCache(connection: $connection);
             } elseif (method_exists($this->parent, 'flushCache')) {
                 $this->parent->flushCache();
             } else {
@@ -123,7 +128,7 @@ trait FlushesPivotCache
             $related = $this->getRelated();
 
             if (method_exists($related, 'flushModelCache')) {
-                $related->flushModelCache();
+                $related->flushModelCache(connection: $connection);
             }
 
             $this->flushPivotTag();
@@ -131,17 +136,7 @@ trait FlushesPivotCache
             resolve(ModelCacheDebugger::class)->info("Cache flushed after {$operation} operation for model: " . get_class($this->parent));
         };
 
-        // Pivot writes go through newPivotStatement(), which uses the related
-        // model's builder/connection — not the parent's. Defer on that same
-        // connection so a rollback on it never leaves a stale cache behind.
-        $connection = $this->getQuery()->getConnection();
-
-        // Defer flush until the write connection commits to avoid flushing on rollback
-        if ($connection->transactionLevel() > 0) {
-            $connection->afterCommit($flush);
-        } else {
-            $flush();
-        }
+        HasCachedQueries::deferFlushUntilCommit($connection, $flush);
     }
 
     /**

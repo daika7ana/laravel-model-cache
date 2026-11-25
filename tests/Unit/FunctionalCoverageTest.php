@@ -181,6 +181,20 @@ class FunctionalCoverageTest extends TestCase
     }
 
     #[Test]
+    public function it_does_not_double_cache_paginates_nested_row_query()
+    {
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+
+        Post::paginate(2);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        Post::forPage(1, 2)->get();
+
+        $this->assertCount(1, DB::getQueryLog(), "paginate()'s nested row read must not also be cached under the plain get() key");
+    }
+
+    #[Test]
     public function it_keeps_paginator_links_per_request_path()
     {
         for ($i = 1; $i <= 3; $i++) {
@@ -696,5 +710,66 @@ class FunctionalCoverageTest extends TestCase
 
         $this->assertSame(2, $after, 'insertUsing() must invalidate the cached count');
         $this->assertGreaterThan(0, $queries);
+    }
+
+    #[Test]
+    public function it_bypasses_cache_for_after_query_callbacks_registered_on_the_base_query()
+    {
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+
+        $make = function () {
+            $builder = Post::query();
+            $builder->getQuery()->afterQuery(fn($results) => $results);
+
+            return $builder;
+        };
+
+        $make()->get();
+        $make()->count();
+        $make()->paginate(5);
+        $make()->pluck('title');
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $make()->get();
+        $make()->count();
+        $make()->paginate(5);
+        $make()->pluck('title');
+
+        $this->assertCount(5, DB::getQueryLog(), 'Base-level afterQuery() callbacks must bypass the cache for every read path');
+    }
+
+    #[Test]
+    public function it_does_not_cache_eager_loads_registering_base_level_after_query_callbacks(): void
+    {
+        $post = Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        $post->comments()->create(['author' => 'a', 'body' => 'original']);
+
+        $mutate = fn($rows) => $rows->each(function ($row) {
+            $row->body = 'MUTATED';
+        });
+
+        $first = Post::with(['comments' => fn($q) => $q->getBaseQuery()->afterQuery($mutate)])->get();
+        $this->assertSame('MUTATED', $first->first()->comments->first()->body, 'the eager load should run the mutation');
+
+        $second = Post::with('comments')->get();
+        $this->assertSame('original', $second->first()->comments->first()->body, 'a plain with() read must not serve the mutated rows from a poisoned cache entry');
+    }
+
+    #[Test]
+    public function it_does_not_cache_eager_loads_registering_eloquent_level_after_query_callbacks(): void
+    {
+        $post = Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        $post->comments()->create(['author' => 'a', 'body' => 'original']);
+
+        $mutate = fn($rows) => $rows->each(function ($row) {
+            $row->body = 'MUTATED';
+        });
+
+        $first = Post::with(['comments' => fn($q) => $q->getQuery()->afterQuery($mutate)])->get();
+        $this->assertSame('MUTATED', $first->first()->comments->first()->body, 'the eager load should run the mutation');
+
+        $second = Post::with('comments')->get();
+        $this->assertSame('original', $second->first()->comments->first()->body, 'a plain with() read must not serve the mutated rows from a poisoned cache entry');
     }
 }

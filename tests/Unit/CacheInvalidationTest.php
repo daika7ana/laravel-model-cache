@@ -729,6 +729,21 @@ class CacheInvalidationTest extends TestCase
     }
 
     #[Test]
+    public function it_caches_reads_with_a_bound_debugger_spy(): void
+    {
+        $this->installDebuggerSpy();
+
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        Post::where('published', true)->get(); // primes the cache
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        Post::where('published', true)->get(); // second read: must be a cache hit
+
+        $this->assertSame(0, count(DB::getQueryLog()), 'a bound debugger spy must not break caching');
+    }
+
+    #[Test]
     public function it_flushes_cache_exactly_once_on_mass_restore()
     {
         $spy = $this->installDebuggerSpy();
@@ -799,6 +814,43 @@ class CacheInvalidationTest extends TestCase
     }
 
     // ========== Single flush on instance operations ==========
+
+    #[Test]
+    public function it_flushes_on_the_connection_that_wrote_not_the_model_default()
+    {
+        config()->set('database.connections.secondary', [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'prefix' => '',
+        ]);
+        $this->artisan('migrate', [
+            '--database' => 'secondary',
+            '--realpath' => true,
+            '--path' => __DIR__ . '/../Fixtures/database/migrations',
+        ])->assertExitCode(0);
+
+        // Prime the cache on the secondary connection while it has no rows.
+        $this->assertNull(Post::on('secondary')->firstFromCache());
+        $this->assertSame(0, Post::on('secondary')->count());
+
+        // An open transaction on the model's default connection must not defer
+        // the flush for writes that already committed on the secondary.
+        DB::beginTransaction();
+
+        Post::on('secondary')->insert([
+            ['title' => 'Secondary Post', 'content' => 'Content', 'published' => true],
+        ]);
+        $this->assertNotNull(Post::on('secondary')->firstFromCache(), 'Mass write on the secondary connection must flush immediately');
+        $this->assertSame(1, Post::on('secondary')->count());
+
+        $post = new Post();
+        $post->setConnection('secondary');
+        $post->fill(['title' => 'Second Post', 'content' => 'Content', 'published' => true]);
+        $post->save();
+        $this->assertSame(2, Post::on('secondary')->count(), 'Instance write on the secondary connection must flush immediately');
+
+        DB::rollBack();
+    }
 
     /**
      * Replace the debugger with a spy that counts flushModelCache() executions.

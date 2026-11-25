@@ -63,9 +63,7 @@ class ClearModelCacheCommand extends Command
             $this->components->warn("Warning: The model {$modelClass} doesn't use HasCachedQueries trait. Cache functionality might be limited.");
         }
 
-        // Show the current cache configuration
-        $this->components->info('Current cache driver: ' . config('cache.default'));
-        $this->components->info('Model cache store: ' . config('model-cache.cache_store', 'default'));
+        $this->components->info('Current cache driver: ' . CacheStoreResolver::resolveStoreName());
 
         try {
             // First check if the model has static flush methods
