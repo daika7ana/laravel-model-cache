@@ -1575,13 +1575,13 @@ class CacheableBuilder extends Builder
      */
     protected function hasAfterQueryCallbacks(): bool
     {
-        return $this->builderHasAfterQueryCallbacks($this)
-            || $this->builderHasAfterQueryCallbacks($this->getQuery());
+        return $this->builderHasAfterQueryCallbacks($this);
     }
 
     /**
      * Whether a builder (root or relation query) has afterQuery() callbacks.
      * Reflection is used because the property is protected on a parent class.
+     * An Eloquent builder also covers its wrapped base query.
      */
     protected function builderHasAfterQueryCallbacks($builder): bool
     {
@@ -1592,10 +1592,15 @@ class CacheableBuilder extends Builder
         try {
             $property = new \ReflectionProperty($builder, 'afterQueryCallbacks');
 
-            return ! empty($property->getValue($builder));
+            if (! empty($property->getValue($builder))) {
+                return true;
+            }
         } catch (\Throwable $e) {
             return false;
         }
+
+        return $builder instanceof Builder
+            && $this->builderHasAfterQueryCallbacks($builder->getQuery());
     }
 
     /**
@@ -1874,8 +1879,7 @@ class CacheableBuilder extends Builder
             // fingerprint the scoped builder, not the raw newQuery() builder.
             $scoped = $query->applyScopes();
 
-            if ($this->builderHasAfterQueryCallbacks($scoped)
-                || $this->builderHasAfterQueryCallbacks($scoped->getQuery())) {
+            if ($this->builderHasAfterQueryCallbacks($scoped)) {
                 return null;
             }
 

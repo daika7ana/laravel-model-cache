@@ -734,4 +734,21 @@ class FunctionalCoverageTest extends TestCase
 
         $this->assertCount(2, DB::getQueryLog(), 'Base-level afterQuery() callbacks must bypass the cache for get() and aggregates');
     }
+
+    #[Test]
+    public function it_does_not_cache_eager_loads_registering_base_level_after_query_callbacks(): void
+    {
+        $post = Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        $post->comments()->create(['author' => 'a', 'body' => 'original']);
+
+        $mutate = fn($rows) => $rows->each(function ($row) {
+            $row->body = 'MUTATED';
+        });
+
+        $first = Post::with(['comments' => fn($q) => $q->getBaseQuery()->afterQuery($mutate)])->get();
+        $this->assertSame('MUTATED', $first->first()->comments->first()->body, 'the eager load should run the mutation');
+
+        $second = Post::with('comments')->get();
+        $this->assertSame('original', $second->first()->comments->first()->body, 'a plain with() read must not serve the mutated rows from a poisoned cache entry');
+    }
 }
