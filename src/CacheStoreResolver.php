@@ -26,4 +26,21 @@ final class CacheStoreResolver
             return Cache::store(config('cache.default'));
         }
     }
+
+    /**
+     * The name of the store resolve() serves, fallback included, so status
+     * output can name the store reads and flushes actually use.
+     */
+    public static function resolveStoreName(): string
+    {
+        $store = (string) config('model-cache.cache_store');
+
+        try {
+            $store ? Cache::store($store) : Cache::store();
+        } catch (\Throwable $e) {
+            return (string) config('cache.default');
+        }
+
+        return $store ?: (string) config('cache.default');
+    }
 }
