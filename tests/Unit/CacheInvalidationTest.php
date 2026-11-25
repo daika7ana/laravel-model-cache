@@ -729,6 +729,21 @@ class CacheInvalidationTest extends TestCase
     }
 
     #[Test]
+    public function it_caches_reads_with_a_bound_debugger_spy(): void
+    {
+        $this->installDebuggerSpy();
+
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+        Post::where('published', true)->get(); // primes the cache
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        Post::where('published', true)->get(); // second read: must be a cache hit
+
+        $this->assertSame(0, count(DB::getQueryLog()), 'a bound debugger spy must not break caching');
+    }
+
+    #[Test]
     public function it_flushes_cache_exactly_once_on_mass_restore()
     {
         $spy = $this->installDebuggerSpy();

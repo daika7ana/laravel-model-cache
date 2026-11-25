@@ -40,13 +40,6 @@ class CacheableBuilder extends Builder
     protected $cacheLockSeconds;
 
     /**
-     * Memoized debugger so the hot read path resolves the container once.
-     *
-     * @var ModelCacheDebugger|null
-     */
-    protected $debugger;
-
-    /**
      * Memoized eager-load constraint fingerprints, keyed by closure instance.
      * A WeakMap auto-evicts entries when a closure is freed (e.g. after
      * without()/withOnly()), so a reused object id can never return a stale
@@ -1205,13 +1198,13 @@ class CacheableBuilder extends Builder
         if (! config('model-cache.use_cache_locks', false)) {
             [$hit, $value] = $read();
             if ($hit) {
-                $this->cacheDebugger()->debug("Cache hit for key: {$cacheKey}");
+                resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
 
                 return $value;
             }
 
             $captureNamespace();
-            $this->cacheDebugger()->debug("Cache miss, executing query for key: {$cacheKey}");
+            resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
             $result = $callback();
             $write($result);
 
@@ -1223,7 +1216,7 @@ class CacheableBuilder extends Builder
 
         [$hit, $value] = $read();
         if ($hit) {
-            $this->cacheDebugger()->debug("Cache hit for key: {$cacheKey}");
+            resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
 
             return $value;
         }
@@ -1232,7 +1225,7 @@ class CacheableBuilder extends Builder
 
         if ($lock->get()) {
             $captureNamespace();
-            $this->cacheDebugger()->debug("Cache miss, executing query for key: {$cacheKey}");
+            resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
 
             try {
                 $result = $callback();
@@ -1257,13 +1250,13 @@ class CacheableBuilder extends Builder
 
             [$hit, $value] = $read();
             if ($hit) {
-                $this->cacheDebugger()->debug("Cache hit for key: {$cacheKey}");
+                resolve(ModelCacheDebugger::class)->debug("Cache hit for key: {$cacheKey}");
 
                 return $value;
             }
         }
 
-        $this->cacheDebugger()->debug("Cache miss, executing query for key: {$cacheKey}");
+        resolve(ModelCacheDebugger::class)->debug("Cache miss, executing query for key: {$cacheKey}");
 
         return $callback();
     }
@@ -2712,14 +2705,6 @@ class CacheableBuilder extends Builder
         $this->queryDependencyUncertain = true;
 
         return null;
-    }
-
-    /**
-     * Memoized debugger so the hot read path resolves the container once.
-     */
-    protected function cacheDebugger(): ModelCacheDebugger
-    {
-        return $this->debugger ??= resolve(ModelCacheDebugger::class);
     }
 
     /**
