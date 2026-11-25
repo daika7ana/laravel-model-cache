@@ -4,7 +4,7 @@ Laravel package (fork of `ymigval/laravel-model-cache`) that caches Eloquent que
 
 ## Commands
 
-- `composer test` — `vendor/bin/phpunit` (Unit + Feature suites; 259 tests, 668 assertions, ~5s; redis 666 with 1 intentional skip). phpunit.xml defaults to the `array` store. For real tag-store runs: `docker compose up -d` (memcached:1.6 on 11211, redis:8-alpine on 6379), then `CACHE_DRIVER=memcached vendor/bin/phpunit` and `CACHE_DRIVER=redis vendor/bin/phpunit` (needs the matching PHP ext). All three drivers pass.
+- `composer test` — `vendor/bin/phpunit` (Unit + Feature suites; 261 tests, 671 assertions, ~5s; redis 669 with 1 intentional skip). phpunit.xml defaults to the `array` store. For real tag-store runs: `docker compose up -d` (memcached:1.6 on 11211, redis:8-alpine on 6379), then `CACHE_DRIVER=memcached vendor/bin/phpunit` and `CACHE_DRIVER=redis vendor/bin/phpunit` (needs the matching PHP ext). All three drivers pass.
 - `composer check-style` — `vendor/bin/pint --test`. Passes on HEAD. `composer fix-style` — `vendor/bin/pint --dirty` (only touched files); plain `vendor/bin/pint` sweeps the repo.
 - Pint preset is `per`, **not** `laravel` — it enforces `ordered_class_elements`, `function_declaration`, etc. Run `vendor/bin/pint --dirty` after adding test helper methods; a fresh private method mid-class often trips `ordered_class_elements`.
 

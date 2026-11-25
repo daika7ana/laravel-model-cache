@@ -10,7 +10,7 @@ All notable changes to `laravel-model-cache` will be documented in this file.
 
 ### Fixed
 - Deferred flushes now run on the connection that performed the write instead of the model's default connection, so multi-connection apps no longer serve stale rows after a rollback on an unrelated connection.
-- Queries with base-level `afterQuery()` callbacks (registered on the underlying `Query\Builder`) bypass the cache instead of freezing the mutated result; aggregates still cache when only Eloquent-level callbacks are registered, since those never run on aggregates.
+- Queries and eager-loaded relations with base-level `afterQuery()` callbacks (registered on the underlying `Query\Builder`) bypass the cache instead of freezing the mutated result; aggregates still cache when only Eloquent-level callbacks are registered, since those never run on aggregates.
 - `mcache:flush` reports the resolved model cache store instead of the default cache driver.
 
 ## [1.2.0] - 2026-11-18
