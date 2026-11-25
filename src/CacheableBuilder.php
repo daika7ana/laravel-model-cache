@@ -1528,16 +1528,7 @@ class CacheableBuilder extends Builder
     {
         // Cheap state-only checks first; the tag-support check resolves the
         // cache driver, so run it only if the others don't already bypass.
-        // Reads inside an open transaction must hit the DB: the matching flush
-        // is deferred to commit, so a cache hit would hide the transaction's
-        // own writes, and an uncommitted result could be cached then rolled back.
-        if ($this->getQuery()->getConnection()->transactionLevel() > 0) {
-            return true;
-        }
-
-        // Pessimistic locks are a side effect of the SELECT, not its result.
-        // A cache hit runs no SQL, so the row lock would never be acquired.
-        if ($this->getQuery()->lock !== null) {
+        if ($this->shouldHitDatabase()) {
             return true;
         }
 
