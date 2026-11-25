@@ -47,6 +47,17 @@ class ConsoleCommandTest extends TestCase
     }
 
     #[Test]
+    public function it_reports_the_resolved_model_cache_store_not_the_default_driver()
+    {
+        config()->set('cache.stores.dedicated', ['driver' => 'array', 'serialize' => false]);
+        config()->set('model-cache.cache_store', 'dedicated');
+
+        $this->artisan('mcache:flush', ['model' => Post::class])
+            ->expectsOutputToContain('Current cache driver: dedicated')
+            ->assertExitCode(0);
+    }
+
+    #[Test]
     public function it_can_flush_cache_for_all_models()
     {
         // Create and cache data for multiple models
