@@ -420,21 +420,11 @@ class CacheableBuilder extends Builder
         $minutes = $this->effectiveCacheMinutes();
 
         if ($this->shouldBypassCache($minutes)) {
-            return parent::paginate($perPage, $columns, $pageName, $page, $total);
+            return $this->paginateWithoutInnerCache($perPage, $columns, $pageName, $page, $total);
         }
 
         $callback = function () use ($perPage, $columns, $pageName, $page, $total) {
-            // parent::paginate() fetches rows through a nested $this->get();
-            // cacheMinutes = 0 keeps that inner read from building its own key
-            // and writing the page's rows a second time.
-            $originalMinutes = $this->cacheMinutes;
-            $this->cacheMinutes = 0;
-
-            try {
-                $result = parent::paginate($perPage, $columns, $pageName, $page, $total);
-            } finally {
-                $this->cacheMinutes = $originalMinutes;
-            }
+            $result = $this->paginateWithoutInnerCache($perPage, $columns, $pageName, $page, $total);
 
             if ($this->hasMorphDependency && $this->resultHasUnmappedMorphType($result)) {
                 $this->resultUncacheable = true;
@@ -1237,6 +1227,22 @@ class CacheableBuilder extends Builder
     }
 
     /**
+     * Execute parent::paginate() with inner get() caching disabled so the nested
+     * row fetch does not build a duplicate cache key or write a second entry.
+     */
+    protected function paginateWithoutInnerCache($perPage, $columns, $pageName, $page, $total)
+    {
+        $originalMinutes = $this->cacheMinutes;
+        $this->cacheMinutes = 0;
+
+        try {
+            return parent::paginate($perPage, $columns, $pageName, $page, $total);
+        } finally {
+            $this->cacheMinutes = $originalMinutes;
+        }
+    }
+
+    /**
      * Execute an aggregate query with caching support.
      *
      * @param  string  $method  The aggregate method name (count, sum, min, max, avg)
@@ -1513,18 +1519,28 @@ class CacheableBuilder extends Builder
      */
     protected function builderHasAfterQueryCallbacks($builder): bool
     {
-        if (! is_object($builder) || ! property_exists($builder, 'afterQueryCallbacks')) {
+        if (! is_object($builder)) {
             return false;
         }
 
-        try {
-            $property = new \ReflectionProperty($builder, 'afterQueryCallbacks');
+        /** @var array<class-string, \ReflectionProperty|false> $properties */
+        static $properties = [];
 
-            if (! empty($property->getValue($builder))) {
-                return true;
+        $class = $builder::class;
+
+        if (! array_key_exists($class, $properties)) {
+            try {
+                $properties[$class] = property_exists($builder, 'afterQueryCallbacks')
+                    ? new \ReflectionProperty($class, 'afterQueryCallbacks')
+                    : false;
+            } catch (\Throwable $e) {
+                $properties[$class] = false;
             }
-        } catch (\Throwable $e) {
-            return false;
+        }
+
+        if ($properties[$class] instanceof \ReflectionProperty
+            && ! empty($properties[$class]->getValue($builder))) {
+            return true;
         }
 
         return $builder instanceof Builder

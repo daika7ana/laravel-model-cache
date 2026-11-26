@@ -285,6 +285,27 @@ class RegressionTest extends TestCase
         $this->assertSame([], $keyLogs, 'Every read path must hit the DB inside a transaction before any cache key is built');
     }
 
+    #[Test]
+    public function it_skips_nested_cache_key_computation_when_paginate_bypasses_cache()
+    {
+        Post::create(['title' => 'Post', 'content' => 'Content', 'published' => true]);
+
+        config()->set('model-cache.debug_mode', true);
+        $logger = $this->installLogRecorder();
+
+        // A raw subquery (contains SELECT) triggers shouldBypassCache() via
+        // queryDependencyUncertain; paginate()'s nested get() must not build a second cache key.
+        $page = Post::whereRaw('published = (select 1)')->paginate(5);
+
+        $this->assertCount(1, $page);
+
+        $bypassLogs = array_filter($logger->records, fn($record) => str_contains($record[1], 'Bypassing cache for this query.'));
+        $this->assertCount(1, $bypassLogs, 'Raw subquery must exercise the shouldBypassCache() branch');
+
+        $keyLogs = array_filter($logger->records, fn($record) => str_contains($record[1], 'Generated cache key'));
+        $this->assertCount(1, $keyLogs, 'Bypassed paginate() must not build a second cache key for its nested get()');
+    }
+
     // ========== 6. Debugger config not cached ==========
 
     #[Test]
