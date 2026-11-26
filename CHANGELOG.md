@@ -4,9 +4,12 @@ All notable changes to `laravel-model-cache` will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-27
+
 ### Changed
 - Reads bound for the database (inside a transaction or behind a pessimistic lock) skip cache-key and eager-load resolution instead of computing a key they cannot use.
-- `paginate()`'s nested row query no longer builds its own cache key or stores the page rows a second time; the paginator entry stays the only cache write.
+- `paginate()`'s nested row query no longer builds its own cache key (on both cacheable misses and `shouldBypassCache()` bypasses) or stores the page rows a second time; the paginator entry stays the only cache write.
+- Memoized per-class `ReflectionProperty` lookups in `afterQuery()` callback detection.
 
 ### Fixed
 - Deferred flushes now run on the connection that performed the write instead of the model's default connection, so an unrelated connection's open transaction — or its rollback — no longer delays or drops the flush of a write made outside it.
